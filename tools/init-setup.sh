@@ -24,7 +24,7 @@ _set_log_prefix "init"
 
 # Setup constants
 readonly REQUIRED_PACKAGES=("docker.io" "docker-compose-plugin" "jq" "curl" "openssl")
-readonly OPTIONAL_PACKAGES=("fail2ban" "ufw" "gettext")
+readonly OPTIONAL_PACKAGES=("fail2ban" "ufw" "gettext" "nftables")
 
 # --- FIX: New function to validate script permissions ---
 _validate_script_permissions() {
@@ -173,7 +173,7 @@ _install_required_packages() {
 
     # Install optional packages with user consent
     if [[ "$AUTO_MODE" != "true" ]]; then
-        _log_confirm "Install optional security packages (fail2ban, ufw)?" "Y"
+        _log_confirm "Install optional security packages (fail2ban, ufw, nftables)?" "Y"
         read -r response
         response=${response:-Y}
 
@@ -272,8 +272,8 @@ _setup_cron_jobs() {
 0 3 * * * root cd $project_root && ./tools/update-cloudflare-ips.sh --quiet 2>&1 | logger -t cloudflare-ips
 
 # Log rotation and cleanup (daily at 4 AM)
-0 4 * * * root find $project_root/logs -name "*.log" -size +50M -exec truncate -s 10M {} \; 2>&1 | logger -t log-cleanup
-0 4 * * * root find /var/lib/${PROJECT_NAME}/backups -name "*.backup*" -mtime +30 -delete 2>&1 | logger -t backup-cleanup
+0 4 * * * root find ${PROJECT_STATE_DIR}/logs -name "*.log" -size +50M -exec truncate -s 10M {} \; 2>&1 | logger -t log-cleanup
+0 4 * * * root find ${PROJECT_STATE_DIR}/backups -name "*.backup*" -mtime +30 -delete 2>&1 | logger -t backup-cleanup
 
 EOF
 
@@ -332,24 +332,19 @@ _configure_cloudflare_fail2ban() {
     _log_section "Cloudflare Fail2Ban Integration"
 
     local cloudflare_conf="$ROOT_DIR/fail2ban/action.d/cloudflare.conf"
+    local jail_local_template="$ROOT_DIR/fail2ban/jail.local"
+    local jail_local_output="$ROOT_DIR/fail2ban/jail.d/jail.local"
     local cloudflare_email="${CLOUDFLARE_EMAIL:-}"
     local cloudflare_api_key="${CLOUDFLARE_API_KEY:-}"
+    local fail2ban_action="nftables-multiport" # Default action
 
-    # Check if template file exists
-    if [[ ! -f "$cloudflare_conf" ]]; then
-        _log_warning "Cloudflare fail2ban template not found: $cloudflare_conf"
+    if [[ ! -f "$cloudflare_conf" ]] || [[ ! -f "$jail_local_template" ]]; then
+        _log_warning "Fail2ban configuration files not found, skipping integration."
         return 0
     fi
 
-    # Load configuration if not already loaded
-    if [[ -z "$cloudflare_email" ]] && [[ -f "$CONFIG_FILE" ]]; then
-        cloudflare_email=$(jq -r '.CLOUDFLARE_EMAIL // empty' "$CONFIG_FILE" 2>/dev/null || echo "")
-        cloudflare_api_key=$(jq -r '.CLOUDFLARE_API_KEY // empty' "$CONFIG_FILE" 2>/dev/null || echo "")
-    fi
-
-    # Prompt for Cloudflare credentials if not provided
     if [[ -z "$cloudflare_email" ]] && [[ "$AUTO_MODE" != "true" ]]; then
-        _log_info "Configuring Cloudflare integration for fail2ban"
+        _log_info "Configuring Cloudflare integration for fail2ban."
         _log_prompt "Enter Cloudflare email (leave blank to skip)"
         read -r cloudflare_email
 
@@ -360,37 +355,34 @@ _configure_cloudflare_fail2ban() {
         fi
     fi
 
-    # Apply configuration if credentials are available
     if [[ -n "$cloudflare_email" ]] && [[ -n "$cloudflare_api_key" ]]; then
-        _log_info "Configuring Cloudflare fail2ban integration..."
-
-        # Replace template variables
+        _log_info "Applying Cloudflare credentials to Fail2ban..."
         sed -i.bak \
             -e "s/{{CLOUDFLARE_EMAIL}}/$cloudflare_email/g" \
             -e "s/{{CLOUDFLARE_API_KEY}}/$cloudflare_api_key/g" \
             "$cloudflare_conf"
-
-        # Secure the configuration file
         chmod 600 "$cloudflare_conf"
+        _log_success "Cloudflare action configured."
 
-        _log_success "Cloudflare fail2ban integration configured"
+        fail2ban_action="cloudflare"
+        _log_info "Setting 'cloudflare' as the active ban action."
 
-        # Update settings.json with Cloudflare credentials if not already present
         if [[ -f "$CONFIG_FILE" ]]; then
-            local temp_config
-            temp_config=$(mktemp)
-
+            local temp_config; temp_config=$(mktemp)
             jq --arg email "$cloudflare_email" --arg key "$cloudflare_api_key" \
                '.CLOUDFLARE_EMAIL = $email | .CLOUDFLARE_API_KEY = $key' \
                "$CONFIG_FILE" > "$temp_config" && mv "$temp_config" "$CONFIG_FILE"
-
             chmod 600 "$CONFIG_FILE"
         fi
-
     else
-        _log_info "Cloudflare integration skipped (no credentials provided)"
-        _log_info "You can configure this later by editing $cloudflare_conf"
+        _log_warning "Cloudflare integration skipped. Configuring Fail2ban for local firewall blocking."
+        _log_info "Setting 'nftables-multiport' as the active ban action."
     fi
+
+    # Render the jail.local file with the selected action
+    _log_info "Rendering fail2ban jail configuration..."
+    sed "s/{{FAIL2BAN_ACTION}}/$fail2ban_action/g" "$jail_local_template" > "$jail_local_output"
+    _log_success "Fail2ban jail configured to use '$fail2ban_action' action."
 }
 
 _generate_initial_configuration() {
@@ -485,7 +477,12 @@ _create_configuration_file() {
   "CLOUDFLARE_EMAIL": "",
   "CLOUDFLARE_API_KEY": "",
   "BACKUP_KEEP_DB": 30,
-  "BACKUP_KEEP_FULL": 8
+  "BACKUP_KEEP_FULL": 8,
+  "CONTAINER_NAME_VAULTWARDEN": "bw_vaultwarden",
+  "CONTAINER_NAME_CADDY": "bw_caddy",
+  "CONTAINER_NAME_FAIL2BAN": "bw_fail2ban",
+  "CONTAINER_NAME_WATCHTOWER": "bw_watchtower",
+  "CONTAINER_NAME_DDCLIENT": "bw_ddclient"
 }
 EOF
 
@@ -513,13 +510,12 @@ _create_system_structure() {
         "$PROJECT_STATE_DIR/logs/vaultwarden"
         "$PROJECT_STATE_DIR/logs/fail2ban"
         "$PROJECT_STATE_DIR/logs/watchtower"
+        "$PROJECT_STATE_DIR/logs/ddclient"
         "$PROJECT_STATE_DIR/backups"
         "$PROJECT_STATE_DIR/state"
         "$PROJECT_STATE_DIR/caddy_data"
         "$PROJECT_STATE_DIR/caddy_config"
         "/etc/caddy-extra"
-        "$ROOT_DIR/data"
-        "$ROOT_DIR/logs"
         "$ROOT_DIR/caddy"
         "$ROOT_DIR/ddclient"
     )
@@ -528,28 +524,8 @@ _create_system_structure() {
         _create_directory_secure "$dir" "755"
     done
 
-    # Create symlinks for backward compatibility with docker-compose paths
-    local symlinks=(
-        "$ROOT_DIR/data/bwdata:$PROJECT_STATE_DIR/data/bwdata"
-        "$ROOT_DIR/logs/caddy:$PROJECT_STATE_DIR/logs/caddy"
-        "$ROOT_DIR/logs/vaultwarden:$PROJECT_STATE_DIR/logs/vaultwarden"
-        "$ROOT_DIR/logs/fail2ban:$PROJECT_STATE_DIR/logs/fail2ban"
-        "$ROOT_DIR/logs/watchtower:$PROJECT_STATE_DIR/logs/watchtower"
-    )
-
-    for symlink in "${symlinks[@]}"; do
-        local link_src="${symlink%:*}"
-        local link_dst="${symlink#*:}"
-
-        if [[ ! -e "$link_src" ]]; then
-            ln -s "$link_dst" "$link_src" 2>/dev/null || true
-            _log_debug "Created symlink: $link_src -> $link_dst"
-        fi
-    done
-
     # Create placeholder files
     local placeholders=(
-        "/etc/caddy-extra/cloudflare-ips.caddy"
         "$ROOT_DIR/caddy/cloudflare-ips.caddy"
         "$ROOT_DIR/ddclient/ddclient.conf"
     )
@@ -590,7 +566,7 @@ _validate_setup_completion() {
     _validate_docker_compose
 
     # Validate required directories
-    local critical_dirs=("$PROJECT_STATE_DIR" "/etc/caddy-extra" "$ROOT_DIR/data" "$ROOT_DIR/logs" "$ROOT_DIR/ddclient")
+    local critical_dirs=("$PROJECT_STATE_DIR" "/etc/caddy-extra" "$ROOT_DIR/caddy" "$ROOT_DIR/ddclient")
     for dir in "${critical_dirs[@]}"; do
         if [[ ! -d "$dir" ]]; then
             _log_error "Required directory not created: $dir"
@@ -626,7 +602,7 @@ _display_next_steps() {
 
     _log_info "Project Information:"
     _print_key_value "Name" "$PROJECT_NAME"
-    _print_key_value "Data Directory" "$PROJECT_STATE_DIR" 
+    _print_key_value "Data Directory" "$PROJECT_STATE_DIR"
     _print_key_value "Service Name" "${PROJECT_NAME}.service"
 }
 

@@ -93,26 +93,25 @@ _rotate_local_secrets() {
 }
 
 _create_oci_secret() {
-  local settings_file="$1"
-  _log_header "Creating OCI Vault Secret"
-  [[ -f "$settings_file" ]] || { _log_error "Settings file not found: $settings_file"; return 1; }
-  _have_cmd oci || { _log_error "OCI CLI not found"; return 1; }
-  oci iam region list >/dev/null 2>&1 || { _log_error "OCI CLI authentication failed"; return 1; }
-
-  local content
-  content="$(cat "$settings_file")" || { _log_error "Failed to read settings file"; return 1; }
-  echo "$content" | jq . >/dev/null 2>&1 || { _log_error "Settings file contains invalid JSON"; return 1; }
-
-  if [[ "$DRY_RUN" == "true" ]]; then
-    _log_info "[DRY RUN] Would create OCI Vault secret with settings from $settings_file"
-    return 0
-  fi
-
-  local encoded; encoded="$(printf '%s' "$content" | base64 -w 0 2>/dev/null || printf '%s' "$content" | base64)"
-  _log_info "Creating OCI Vault secret..."
-  _log_warning "This requires proper OCI Vault and compartment configuration"
-  # Placeholder: implement actual oci vault secret create-secret call here
-  return 0
+    _log_header "Creating OCI Vault Secret"
+    _log_error "The 'create-oci' action is not fully implemented for safety."
+    _log_info "Creating secrets requires Compartment, Vault, and Key OCIDs, which are best handled manually."
+    _log_info "Please follow these steps to create the secret using the OCI CLI:"
+    echo
+    _log_numbered_item 1 "Encode your settings.json file:"
+    _log_info "   cat $SETTINGS_FILE | base64 -w 0"
+    echo
+    _log_numbered_item 2 "Run the OCI CLI command:"
+    _log_info "   oci vault secret create-secret \\"
+    _log_info "     --compartment-id <your_compartment_ocid> \\"
+    _log_info "     --vault-id <your_vault_ocid> \\"
+    _log_info "     --key-id <your_key_ocid> \\"
+    _log_info "     --secret-name \"$PROJECT_NAME-config\" \\"
+    _log_info "     --secret-content-content <paste_base64_content_here> \\"
+    _log_info "     --secret-content-content-type BASE64"
+    echo
+    _log_numbered_item 3 "Once created, use the new secret OCID with './tools/oci-setup.sh'."
+    return 1
 }
 
 _update_oci_secret() {
@@ -132,9 +131,9 @@ _update_oci_secret() {
 
   local encoded; encoded="$(printf '%s' "$content" | base64 -w 0 2>/dev/null || printf '%s' "$content" | base64)"
   _log_info "Updating OCI Vault secret: ${secret_ocid:0:20}..."
-  if oci vault secret update-secret \
+  if oci vault secret update \
       --secret-id "$secret_ocid" \
-      --secret-content "{\"content\":\"$encoded\"}" >/dev/null 2>&1; then
+      --secret-content "{\"content\":\"$encoded\", \"contentType\": \"BASE64\"}" >/dev/null 2>&1; then
     _log_success "OCI Vault secret updated successfully"
     return 0
   else

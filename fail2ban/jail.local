@@ -6,15 +6,9 @@ maxretry = 5
 backend = auto
 ignoreip = 127.0.0.1/8 ::1
 
-# --- FIX: Clarified Action ---
-# The default action is 'cloudflare', which blocks IPs at the Cloudflare edge.
-# This is the recommended setup for a proxied application.
-# To block on the host firewall instead, comment out 'action = cloudflare'
-# and uncomment one of the 'banaction' lines below.
-action = cloudflare
-#banaction = nftables-multiport
-#banaction_allports = nftables-allports
-# --- END FIX ---
+# This section is dynamically configured by init-setup.sh
+# It will set the appropriate action based on Cloudflare configuration.
+banaction = {{FAIL2BAN_ACTION}}
 
 # Email notifications (optional - configure SMTP)
 # destemail = admin@yourdomain.com
@@ -35,7 +29,7 @@ bantime = 12h
 [vaultwarden-auth]
 # VaultWarden authentication failures
 enabled = true
-filter = vaultwarden.local
+filter = vaultwarden
 logpath = /var/log/vaultwarden/vaultwarden.log
 ports = 80,443
 maxretry = 5
@@ -45,7 +39,7 @@ bantime = 2h
 [vaultwarden-admin]
 # VaultWarden admin panel protection
 enabled = true
-filter = vaultwarden-admin.local
+filter = vaultwarden-admin
 logpath = /var/log/vaultwarden/vaultwarden.log
 ports = 80,443
 maxretry = 3

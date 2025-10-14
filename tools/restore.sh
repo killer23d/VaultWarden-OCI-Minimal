@@ -38,17 +38,19 @@ restore_db_flow() {
   (cd "$ROOT_DIR" && docker compose stop vaultwarden) || true
 
   # Detect type by suffix
-  local dec gzbase
+  local dec uncompressed
   if echo "$src" | grep -q '.sqlite3.gz.gpg$'; then
     dec="$(decrypt_to_tmp "$src" "$BACKUP_PASSPHRASE" "$ROOT_DIR")"
-    gunzip -f "$dec"
-    restore_db_sqlite "${dec%.gz}"
-    shred -u "${dec%.gz}" || rm -f "${dec%.gz}"
+    uncompressed="${dec%.gz}"
+    gunzip -c "$dec" > "$uncompressed"
+    restore_db_sqlite "$uncompressed"
+    shred -u "$dec" "$uncompressed" || rm -f "$dec" "$uncompressed"
   elif echo "$src" | grep -q '.sql.gz.gpg$'; then
     dec="$(decrypt_to_tmp "$src" "$BACKUP_PASSPHRASE" "$ROOT_DIR")"
-    gunzip -f "$dec"
-    restore_db_from_sql_dump "${dec%.gz}"
-    shred -u "${dec%.gz}" || rm -f "${dec%.gz}"
+    uncompressed="${dec%.gz}"
+    gunzip -c "$dec" > "$uncompressed"
+    restore_db_from_sql_dump "$uncompressed"
+    shred -u "$dec" "$uncompressed" || rm -f "$dec" "$uncompressed"
   else
     die "Unknown DB backup format"
   fi
@@ -72,10 +74,10 @@ restore_full_flow() {
   compose_down
 
   # Decrypt archive to staging
-  local dec
+  local dec tarfile
   dec="$(decrypt_to_tmp "$src" "$BACKUP_PASSPHRASE" "$ROOT_DIR")"
-  gunzip -f "$dec"
-  local tarfile="${dec%.gz}"
+  tarfile="${dec%.gz}"
+  gunzip -c "$dec" > "$tarfile"
   local stage; stage="$(mktemp -d -p "$ROOT_DIR" restore-stage.XXXXXX)"
   tar -C "$stage" -xf "$tarfile"
 
@@ -98,20 +100,22 @@ restore_full_flow() {
     sqlite_enc="$(find "$stage/db" -type f -name 'db-*.sqlite3.gz.gpg' | sort | tail -n1 || true)"
     sql_enc="$(find "$stage/db" -type f -name 'db-*.sql.gz.gpg' | sort | tail -n1 || true)"
     if [ -n "$sqlite_enc" ]; then
-      local dec2; dec2="$(decrypt_to_tmp "$sqlite_enc" "$BACKUP_PASSPHRASE" "$stage")"
-      gunzip -f "$dec2"
-      restore_db_sqlite "${dec2%.gz}"
-      shred -u "${dec2%.gz}" || rm -f "${dec2%.gz}"
+      local dec2 uncompressed2; dec2="$(decrypt_to_tmp "$sqlite_enc" "$BACKUP_PASSPHRASE" "$stage")"
+      uncompressed2="${dec2%.gz}"
+      gunzip -c "$dec2" > "$uncompressed2"
+      restore_db_sqlite "$uncompressed2"
+      shred -u "$dec2" "$uncompressed2" || rm -f "$dec2" "$uncompressed2"
     elif [ -n "$sql_enc" ]; then
-      local dec3; dec3="$(decrypt_to_tmp "$sql_enc" "$BACKUP_PASSPHRASE" "$stage")"
-      gunzip -f "$dec3"
-      restore_db_from_sql_dump "${dec3%.gz}"
-      shred -u "${dec3%.gz}" || rm -f "${dec3%.gz}"
+      local dec3 uncompressed3; dec3="$(decrypt_to_tmp "$sql_enc" "$BACKUP_PASSPHRASE" "$stage")"
+      uncompressed3="${dec3%.gz}"
+      gunzip -c "$dec3" > "$uncompressed3"
+      restore_db_from_sql_dump "$uncompressed3"
+      shred -u "$dec3" "$uncompressed3" || rm -f "$dec3" "$uncompressed3"
     fi
   fi
 
   # Cleanup decrypted materials
-  rm -f "$tarfile"
+  shred -u "$dec" "$tarfile" || rm -f "$dec" "$tarfile"
   rm -rf "$stage"
 
   log "Starting stack"

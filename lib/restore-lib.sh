@@ -13,16 +13,20 @@ need docker
 need gpg
 need sqlite3
 
-# --- FIX: Source config to get dynamic container names for health check ---
+# Source config to get dynamic container names for health check
 if [[ -f "$ROOT_DIR/lib/config.sh" ]]; then
     # shellcheck source=/dev/null
     source "$ROOT_DIR/lib/config.sh"
-    load_config >/dev/null 2>&1 || rlog "Warning: Could not load config for health check names"
+    if ! load_config >/dev/null 2>&1; then
+        rdie "Could not load configuration for health check container names."
+    fi
+else
+    rdie "Critical library lib/config.sh not found."
 fi
-# Define container names with fallbacks
-BW_VW="${CONTAINER_NAME_VAULTWARDEN:-bw_vaultwarden}"
-BW_CADDY="${CONTAINER_NAME_CADDY:-bw_caddy}"
-# --- END FIX ---
+
+# Define container names from loaded configuration
+BW_VW="${CONTAINER_NAME_VAULTWARDEN:?}"
+BW_CADDY="${CONTAINER_NAME_CADDY:?}"
 
 
 # Decrypt to a secure temp file; caller must remove

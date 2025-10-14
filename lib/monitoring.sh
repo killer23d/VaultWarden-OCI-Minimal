@@ -19,6 +19,12 @@ if [[ -f "$ROOT_DIR/lib/config.sh" ]]; then
     load_config >/dev/null 2>&1 || _merr "Failed to load configuration for container names"
 fi
 
+# Source system library for compose helpers
+if [[ -f "$ROOT_DIR/lib/system.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "$ROOT_DIR/lib/system.sh"
+fi
+
 # --- FIX: Dynamic Container Names ---
 # Use environment variables for container names, with original names as defaults.
 # These can be set in settings.json (e.g., "CONTAINER_NAME_VAULTWARDEN": "my_vw_container")
@@ -74,11 +80,6 @@ send_mail() {
 }
 
 # Container health checks
-is_container_running() {
-  local name="$1"
-  docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null | grep -qi true
-}
-
 is_container_healthy() {
   local name="$1"
   local health
@@ -94,7 +95,7 @@ stack_is_healthy() {
 
   # Optionals (ignore if container not present; if present, must be running)
   if docker ps -a --format '{{.Names}}' | grep -qx "$BW_FAIL2BAN"; then
-    is_container_running "$BW_FAIL2BAN" || return 1
+    _compose_service_running "fail2ban" || return 1
   fi
   return 0
 }

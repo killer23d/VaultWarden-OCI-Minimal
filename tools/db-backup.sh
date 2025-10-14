@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$ROOT_DIR/lib"
 
 # Load libraries in dependency order
@@ -22,17 +22,49 @@ load_config
 # Set log prefix for this script
 _set_log_prefix "db-backup"
 
+# --- FIX: New function to get DB path from config ---
+_detect_database_path() {
+    if [[ -n "${DB_FILE:-}" ]]; then
+        _log_debug "Using pre-set database path: $DB_FILE"
+        return 0
+    fi
+
+    local db_url
+    db_url=$(get_config_value "DATABASE_URL")
+
+    if [[ -z "$db_url" ]]; then
+        _log_error "DATABASE_URL not found in configuration."
+        return 1
+    fi
+
+    if [[ "$db_url" =~ ^sqlite://(.+) ]]; then
+        local relative_path="${BASH_REMATCH[1]}"
+        if [[ "$relative_path" != /* ]]; then
+            DB_FILE="$ROOT_DIR/$relative_path"
+        else
+            DB_FILE="$relative_path"
+        fi
+        _log_info "Detected database path from config: $DB_FILE"
+    else
+        _log_error "Unsupported DATABASE_URL format: $db_url"
+        return 1
+    fi
+
+    return 0
+}
+
 init_enhanced_backup() {
     _log_info "Initializing enhanced database backup system"
     init_backup_core
 
     : "${BACKUP_PASSPHRASE:?BACKUP_PASSPHRASE is required in settings}"
 
-    DB_FILE="${DB_FILE:-$ROOT_DIR/data/bwdata/db.sqlite3}"
+    _detect_database_path || exit 1
+    
     [[ -f "$DB_FILE" ]] || { _log_error "SQLite database not found at $DB_FILE"; exit 1; }
 
     TS="$(date +%Y%m%d-%H%M%S)"
-    OUT_DIR="${BACKUP_DIR:-$ROOT_DIR/backups/db}/$TS"
+    OUT_DIR="${BACKUP_DIR:-$PROJECT_STATE_DIR/backups/db}/$TS"
     mkdir -p "$OUT_DIR"
 
     _log_success "Backup initialized - Output: $OUT_DIR"

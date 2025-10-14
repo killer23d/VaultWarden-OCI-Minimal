@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$ROOT_DIR/lib"
 
 # Load libraries
@@ -121,7 +121,6 @@ copy_project_configs() {
     fi
   done
 
-  # Create a simple manifest
   cat > "$project_dir/config-manifest.json" <<JSON
 {
   "copied": [$(printf '"%s"' "${copied[@]}" | paste -sd ',')] ,
@@ -148,9 +147,9 @@ include_database_backup() {
 
   if [[ -n "${latest_db_dir:-}" && -d "$latest_db_dir" ]]; then
     local age_h
-    if stat --version >/dev/null 2>&1; then # Linux stat
+    if stat --version >/dev/null 2>&1; then
       age_h=$(( ( $(date +%s) - $(stat -c %Y "$latest_db_dir") ) / 3600 ))
-    else # macOS stat
+    else
       age_h=$(( ( $(date +%s) - $(stat -f %m "$latest_db_dir") ) / 3600 ))
     fi
     if [[ "$age_h" -le 24 ]]; then
@@ -197,18 +196,18 @@ create_fresh_database_backup() {
 
 create_data_snapshot() {
   local stage_dir="${1:?Stage directory required}"
-  if [[ -d "$ROOT_DIR/data/bwdata" ]]; then
+  if [[ -d "$PROJECT_STATE_DIR/data/bwdata" ]]; then
     _log_info "Creating VaultWarden data directory snapshot"
     local data_archive="$stage_dir/bwdata-snapshot.tar.gz"
     if [[ "${USE_LOW_PRIORITY:-0}" = "1" && -x "$(command -v nice || true)" ]]; then
       _log_debug "Using low priority for data snapshot creation"
-      if nice -n 10 tar -C "$ROOT_DIR" -czf "$data_archive" "data/bwdata" 2>/dev/null; then
+      if nice -n 10 tar -C "$PROJECT_STATE_DIR" -czf "$data_archive" "data/bwdata" 2>/dev/null; then
         _log_success "✓ Data snapshot created: $(du -h "$data_archive" | cut -f1)"
       else
         _log_error "✗ Data snapshot creation failed"; rm -f "$data_archive"; return 1
       fi
     else
-      if tar -C "$ROOT_DIR" -czf "$data_archive" "data/bwdata" 2>/dev/null; then
+      if tar -C "$PROJECT_STATE_DIR" -czf "$data_archive" "data/bwdata" 2>/dev/null; then
         _log_success "✓ Data snapshot created: $(du -h "$data_archive" | cut -f1)"
       else
         _log_error "✗ Data snapshot creation failed"; rm -f "$data_archive"; return 1
@@ -294,7 +293,7 @@ main() {
 
   init_full_backup
 
-  check_system_resources "$ROOT_DIR/data/bwdata/db.sqlite3" "$WORK_DIR" 2>/dev/null || true
+  check_system_resources "$PROJECT_STATE_DIR/data/bwdata/db.sqlite3" "$WORK_DIR" 2>/dev/null || true
 
   local component_failures=()
 
@@ -307,7 +306,10 @@ main() {
 
   copy_project_configs "$STAGE"
   include_database_backup "$STAGE"
-  create_data_snapshot "$STAGE" || true
+  
+  if ! create_data_snapshot "$STAGE"; then
+      _log_warning "Data snapshot creation failed, the full backup may be incomplete."
+  fi
 
   local final_archive
   final_archive="$(assemble_final_archive "$WORK_DIR" "$STAGE")"

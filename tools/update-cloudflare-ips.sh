@@ -23,7 +23,6 @@ _set_log_prefix "cloudflare-ips"
 readonly CF_IPV4_URL="https://www.cloudflare.com/ips-v4"
 readonly CF_IPV6_URL="https://www.cloudflare.com/ips-v6"
 readonly CADDY_IP_FILE="$ROOT_DIR/caddy/cloudflare-ips.caddy"
-readonly CADDY_EXTRA_IP_FILE="/etc/caddy-extra/cloudflare-ips.caddy"
 readonly BACKUP_SUFFIX=".backup.$(date +%Y%m%d_%H%M%S)"
 
 QUIET=false
@@ -104,7 +103,7 @@ _update_config_file() {
   }
   if ! _needs_update "$target_file" "$new_content"; then
     _log_debug "No update needed for $target_file"
-    return 0
+    return 1
   fi
   if [[ "$DRY_RUN" == "true" ]]; then
     _log_info "[DRY RUN] Would update: $target_file"
@@ -119,6 +118,24 @@ _update_config_file() {
   chmod 644 "$target_file"
   _log_success "Updated: $target_file"
   return 0
+}
+
+_reload_caddy_config() {
+    if [[ "$DRY_RUN" == "true" ]]; then
+        _log_info "[DRY RUN] Would check and reload Caddy if running."
+        return 0
+    fi
+
+    if _compose_service_running "caddy"; then
+        _log_info "Caddy is running, reloading configuration to apply IP updates..."
+        if docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
+            _log_success "Caddy configuration reloaded successfully."
+        else
+            _log_error "Failed to reload Caddy configuration."
+        fi
+    else
+        _log_debug "Caddy service not running, skipping reload."
+    fi
 }
 
 _update_cloudflare_ips() {
@@ -147,26 +164,22 @@ _update_cloudflare_ips() {
     return 1
   fi
 
-  local caddy_config
+  local caddy_config updated=false
   caddy_config="$(_generate_caddy_config "$ipv4_ranges" "$ipv6_ranges")"
 
-  local errors=0
-  local files_to_update=("$CADDY_IP_FILE" "$CADDY_EXTRA_IP_FILE")
-  for f in "${files_to_update[@]}"; do
-    _update_config_file "$f" "$caddy_config" || ((errors++))
-  done
+  if _update_config_file "$CADDY_IP_FILE" "$caddy_config"; then
+      updated=true
+  fi
 
-  if [[ $errors -eq 0 ]]; then
+  if [[ "$updated" == "true" ]]; then
     _log_success "Cloudflare IP ranges updated successfully"
     _log_info "IPv4 ranges: $ipv4_count"
     _log_info "IPv6 ranges: $ipv6_count"
-    if _compose_service_running "caddy"; then
-      _log_info "Reload Caddy to apply changes: docker compose exec caddy caddy reload"
-    fi
+    _reload_caddy_config
     return 0
   else
-    _log_error "Failed to update $errors configuration file(s)"
-    return 1
+    _log_info "Cloudflare IP ranges are already up to date."
+    return 0
   fi
 }
 

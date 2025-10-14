@@ -37,5 +37,11 @@
   "LOG_LEVEL": "warn",
 
   "BACKUP_KEEP_DB": 30,
-  "BACKUP_KEEP_FULL": 8
+  "BACKUP_KEEP_FULL": 8,
+
+  "CONTAINER_NAME_VAULTWARDEN": "bw_vaultwarden",
+  "CONTAINER_NAME_CADDY": "bw_caddy",
+  "CONTAINER_NAME_FAIL2BAN": "bw_fail2ban",
+  "CONTAINER_NAME_WATCHTOWER": "bw_watchtower",
+  "CONTAINER_NAME_DDCLIENT": "bw_ddclient"
 }

@@ -16,7 +16,7 @@ source "$ROOT_DIR/lib/system.sh"
 
 # Enhanced OCI setup with systemd integration
 _setup_oci_vault() {
-    local compartment_ocid vault_ocid key_ocid secret_name
+    local compartment_ocid vault_ocid key_ocid secret_name new_secret_ocid
     
     _log_info "Setting up OCI Vault integration..."
     
@@ -26,16 +26,15 @@ _setup_oci_vault() {
     fi
     
     # This function would contain the interactive prompts for OCI details
-    # _prompt_oci_details
-    
-    # This function would handle the secret upload
-    # new_secret_ocid=$(_upload_settings_to_vault "$compartment_ocid" "$vault_ocid" "$key_ocid" "$secret_name")
-    
+    # For this script, we'll assume the user provides the secret OCID
+    _log_prompt "Enter the OCID of the OCI Vault Secret"
+    read -r new_secret_ocid
+
     if [[ -n "$new_secret_ocid" ]]; then
-        _log_success "Secret uploaded successfully: $new_secret_ocid"
+        _log_success "Secret OCID provided: ${new_secret_ocid:0:25}..."
         _configure_systemd_persistence "$new_secret_ocid"
     else
-        _log_error "Failed to upload secret to vault"
+        _log_error "No Secret OCID provided. Aborting."
         return 1
     fi
 }
@@ -43,14 +42,16 @@ _setup_oci_vault() {
 _validate_oci_cli() {
     if ! _have_cmd oci >/dev/null 2>&1; then
         _log_error "OCI CLI not installed"
+        _log_info "Please install and configure it first. See OCI documentation."
         return 1
     fi
     
-    if ! oci iam user get --user-id "$(oci iam user list --query 'data[0].id' --raw-output 2>/dev/null)" >/dev/null 2>&1; then
-        _log_error "OCI CLI not authenticated"
+    if ! oci iam region list >/dev/null 2>&1; then
+        _log_error "OCI CLI not authenticated. Please run 'oci setup config'."
         return 1
     fi
     
+    _log_success "OCI CLI is configured and authenticated."
     return 0
 }
 
@@ -59,33 +60,32 @@ _configure_systemd_persistence() {
     
     _log_info "Configuring systemd persistence for OCI secret..."
     
-    printf "${CYAN}Would you like to configure systemd for automatic startup? [Y/n]: ${NC}"
+    printf "${CYAN}Would you like to create/update the systemd service for automatic startup? [Y/n]: ${NC}"
     read -r response
     response=${response:-Y}
     
     case "$response" in
         [nN][oO]|[nN])
-            _log_warning "Manual setup required:"
-            _log_warning "  export OCI_SECRET_OCID=$secret_ocid"
-            _log_warning "  Then run: ./startup.sh"
+            _log_warning "Systemd service not configured. Manual setup required:"
+            _log_warning "  1. Create ${SYSTEMD_ENV_FILE} with OCI_SECRET_OCID=${secret_ocid}"
+            _log_warning "  2. Run: ./startup.sh"
             return 0
             ;;
     esac
     
-    local env_file="$SYSTEMD_ENV_FILE"
-    _log_info "Creating systemd environment file: $env_file"
+    _log_info "Creating systemd environment file: $SYSTEMD_ENV_FILE"
     
-    cat > "$env_file" <<EOF
+    cat > "$SYSTEMD_ENV_FILE" <<EOF
 # ${PROJECT_NAME} - Environment Configuration
 # Generated: $(date)
 OCI_SECRET_OCID=$secret_ocid
 EOF
     
-    chmod 600 "$env_file"
-    chown root:root "$env_file"
+    chmod 600 "$SYSTEMD_ENV_FILE"
+    chown root:root "$SYSTEMD_ENV_FILE"
     
     local service_file="/etc/systemd/system/$SERVICE_NAME"
-    _log_info "Creating systemd service: $service_file"
+    _log_info "Creating systemd service file: $service_file"
     
     cat > "$service_file" <<EOF
 [Unit]
@@ -96,36 +96,32 @@ Wants=network-online.target
 Requires=docker.service
 
 [Service]
-Type=forking
+Type=oneshot
+RemainAfterExit=yes
 Restart=on-failure
 RestartSec=30
 TimeoutStartSec=300
 
 # Environment
-EnvironmentFile=-${env_file}
+EnvironmentFile=-${SYSTEMD_ENV_FILE}
 WorkingDirectory=${ROOT_DIR}
 Environment=COMPOSE_PROJECT_NAME=${PROJECT_NAME}
 
 # Execution
-ExecStartPre=/usr/bin/docker system prune -f --volumes
 ExecStart=${ROOT_DIR}/startup.sh
-ExecStop=${ROOT_DIR}/tools/stop-stack.sh
+ExecStop=/usr/bin/docker compose -f ${ROOT_DIR}/docker-compose.yml down
 ExecReload=/bin/kill -HUP \$MAINPID
 
 # Security
 User=root
 Group=root
-PrivateDevices=yes
-ProtectHome=yes
-ProtectSystem=strict
-ReadWritePaths=${ROOT_DIR} /var/lib/docker /var/run/docker.sock
 
 [Install]
 WantedBy=multi-user.target
 EOF
     
     systemctl daemon-reload
-    systemctl enable "$SERVICE_NAME"
+    _enable_service "$SERVICE_NAME"
     
     _log_success "Systemd service configured and enabled"
     
@@ -136,7 +132,7 @@ EOF
     case "$start_response" in
         [yY][eE][sS]|[yY])
             _log_info "Starting ${PROJECT_NAME} service..."
-            if systemctl start "$SERVICE_NAME"; then
+            if _start_service "$SERVICE_NAME"; then
                 _log_success "Service started successfully"
                 _log_info "Check status with: systemctl status ${SERVICE_NAME}"
                 _log_info "View logs with: journalctl -fu ${SERVICE_NAME}"
@@ -157,12 +153,6 @@ main() {
     _log_header "${PROJECT_NAME} OCI Vault Setup"
     
     _validate_running_as_root
-    _validate_docker_daemon
-    
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-        _log_warning "settings.json not found. Some operations may require it."
-        _log_info "It is recommended to run ./tools/init-setup.sh first."
-    fi
     
     case "${1:-}" in
         --update-ocid)

@@ -27,8 +27,8 @@ services:
       - EXTENDED_LOGGING=${EXTENDED_LOGGING:-true}
       - TZ=${TZ:-UTC}
     volumes:
-      - ./data/bwdata:/data
-      - ./logs/vaultwarden:/logs
+      - ${PROJECT_STATE_DIR}/data/bwdata:/data
+      - ${PROJECT_STATE_DIR}/logs/vaultwarden:/logs
     deploy:
       resources:
         limits:
@@ -65,7 +65,7 @@ services:
       - ./caddy:/etc/caddy-extra:ro
       - caddy_data:/data
       - caddy_config:/config
-      - ./logs/caddy:/var/log/caddy
+      - ${PROJECT_STATE_DIR}/logs/caddy:/var/log/caddy
     deploy:
       resources:
         limits:
@@ -107,9 +107,9 @@ services:
       - F2B_DEST_MAIL=${ADMIN_EMAIL:-root@localhost}
     volumes:
       - ./fail2ban:/data
-      - ./logs/caddy:/var/log/caddy:ro
-      - ./logs/vaultwarden:/var/log/vaultwarden:ro
-      - ./logs/fail2ban:/var/log:rw
+      - ${PROJECT_STATE_DIR}/logs/caddy:/var/log/caddy:ro
+      - ${PROJECT_STATE_DIR}/logs/vaultwarden:/var/log/vaultwarden:ro
+      - ${PROJECT_STATE_DIR}/logs/fail2ban:/var/log:rw
     deploy:
       resources:
         limits:
@@ -179,7 +179,7 @@ services:
       - DDCLIENT_ENABLED=${DDCLIENT_ENABLED:-false}
     volumes:
       - ./ddclient:/config
-      - ./logs/ddclient:/var/log/ddclient
+      - ${PROJECT_STATE_DIR}/logs/ddclient:/var/log/ddclient
     deploy:
       resources:
         limits:
@@ -225,7 +225,7 @@ networks:
     ipam:
       driver: default
       config:
-        - subnet: 172.${shell echo $$ % 240 + 16}.0.0/24
+        - subnet: 172.${shell echo "${COMPOSE_PROJECT_NAME:-vaultwarden}" | md5sum | tr -dc '0-9' | cut -c1-3 | sed 's/^0*//' | awk '{print ($$1 % 240) + 16}'}.0.0/24
     driver_opts:
       com.docker.network.bridge.name: ${COMPOSE_PROJECT_NAME:-vw}-br0
       com.docker.network.driver.mtu: 1500

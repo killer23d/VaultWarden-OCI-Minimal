@@ -170,10 +170,14 @@ _wait_for_service() {
   return 1
 }
 
-# --- FIX: Moved systemd helpers from oci-setup.sh ---
 _update_systemd_secret_ocid() {
     local new_ocid="$1"
-    local env_file="${2:-/etc/systemd/system/vaultwarden.env}" # Default for safety
+    local env_file="$2" # Path must be provided by caller
+
+    if [[ -z "$env_file" ]]; then
+      _log_error "Systemd environment file path is required."
+      return 1
+    fi
 
     if [[ -f "$env_file" ]]; then
         _log_info "Updating systemd environment file..."
@@ -181,19 +185,22 @@ _update_systemd_secret_ocid() {
         systemctl daemon-reload
         _log_success "Environment updated. Restart service to apply changes."
     else
-        _log_warning "Systemd environment file not found. Manual export required:"
-        _log_warning "  export OCI_SECRET_OCID=$new_ocid"
+        _log_warning "Systemd environment file not found: $env_file"
     fi
 }
 
 _restart_service_safely() {
-    local service_name="${1:-vaultwarden.service}" # Default for safety
+    local service_name="$1" # Service name must be provided by caller
+
+    if [[ -z "$service_name" ]]; then
+      _log_error "Service name is required for restart."
+      return 1
+    fi
 
     if systemctl is-active --quiet "$service_name"; then
         _log_info "Performing rolling restart of $service_name..."
         systemctl restart "$service_name"
 
-        # Wait for health check
         local retry_count=0
         while [[ $retry_count -lt 30 ]]; do
             if systemctl is-active --quiet "$service_name"; then
@@ -210,7 +217,6 @@ _restart_service_safely() {
         _log_info "Service not running. Use: systemctl start $service_name"
     fi
 }
-# --- END FIX ---
 
 _create_directory_secure() {
   local dir="$1"; local perm="${2:-755}"; local owner="${3:-root:root}"
