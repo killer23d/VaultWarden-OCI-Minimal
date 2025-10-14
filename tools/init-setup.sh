@@ -134,6 +134,8 @@ _init_setup_workflow() {
     _validate_setup_completion
 
     _log_success "Initial setup completed successfully!"
+    touch "$PROJECT_STATE_DIR/.setup-complete"
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$PROJECT_STATE_DIR/.setup-complete"
     _display_next_steps
 }
 
