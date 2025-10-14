@@ -1,0 +1,38 @@
+{
+  "DOMAIN": "https://vault.yourdomain.com",
+  "ADMIN_EMAIL": "admin@yourdomain.com",
+
+  "ADMIN_TOKEN": "paste-generated-admin-token-here",
+  "BACKUP_PASSPHRASE": "paste-generated-backup-passphrase-here",
+
+  "DATABASE_URL": "sqlite:///data/db.sqlite3",
+  "ROCKET_WORKERS": 1,
+  "WEBSOCKET_ENABLED": false,
+  "SIGNUPS_ALLOWED": false,
+
+  "SMTP_HOST": "smtp.gmail.com",
+  "SMTP_PORT": 587,
+  "SMTP_SECURITY": "starttls", 
+  "SMTP_USERNAME": "your-email@gmail.com",
+  "SMTP_PASSWORD": "your-smtp-app-password",
+  "SMTP_FROM": "noreply@yourdomain.com",
+
+  "PUSH_ENABLED": false,
+  "PUSH_INSTALLATION_ID": "",
+  "PUSH_INSTALLATION_KEY": "",
+  "PUSH_RELAY_URI": "https://api.bitwarden.com",
+
+  "DDCLIENT_ENABLED": false,
+  "DDCLIENT_PROTOCOL": "cloudflare",
+  "DDCLIENT_LOGIN": "your-cloudflare-email@example.com",
+  "DDCLIENT_PASSWORD": "paste-your-cloudflare-global-api-key-here",
+  "DDCLIENT_ZONE": "yourdomain.com",
+  "DDCLIENT_HOST": "vault.yourdomain.com",
+
+  "CLOUDFLARE_EMAIL": "your-cloudflare-email@example.com",
+  "CLOUDFLARE_API_KEY": "paste-your-cloudflare-global-api-key-here",
+
+  "WATCHTOWER_NOTIFICATIONS": "email",
+  "TZ": "UTC",
+  "LOG_LEVEL": "warn"
+}
