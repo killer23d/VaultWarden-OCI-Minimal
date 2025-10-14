@@ -272,7 +272,7 @@ upload_full_backup() {
 
 manage_full_backup_retention() {
   local base_dir="${1:?Base directory required}"
-  local keep="${FULL_BACKUP_KEEP_LOCAL:-8}"
+  local keep="${BACKUP_KEEP_FULL:-8}"
   if [[ "$keep" -gt 0 ]]; then
     _log_info "Managing full backup retention (keeping $keep recent backups)"
     local current_count
