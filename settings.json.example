@@ -34,5 +34,8 @@
 
   "WATCHTOWER_NOTIFICATIONS": "email",
   "TZ": "UTC",
-  "LOG_LEVEL": "warn"
+  "LOG_LEVEL": "warn",
+
+  "BACKUP_KEEP_DB": 30,
+  "BACKUP_KEEP_FULL": 8
 }
