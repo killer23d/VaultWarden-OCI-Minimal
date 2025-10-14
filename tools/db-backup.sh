@@ -202,7 +202,7 @@ upload_backups_to_cloud() {
 manage_backup_retention() {
     local backup_base_dir
     backup_base_dir="$(dirname "$OUT_DIR")"
-    local keep="${BACKUP_KEEP_LOCAL:-30}"
+    local keep="${BACKUP_KEEP_DB:-30}"
     if [[ "$keep" -gt 0 ]]; then
         _log_info "Managing local backup retention (keeping $keep recent backups)"
         local current_count
