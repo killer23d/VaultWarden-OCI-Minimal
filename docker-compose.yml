@@ -32,10 +32,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 2G
           cpus: '1.0'
         reservations:
-          memory: 256M
+          memory: 512M
           cpus: '0.5'
     logging:
       driver: "json-file"
@@ -69,11 +69,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 512M
           cpus: '0.5'
         reservations:
-          memory: 128M
-          cpus: '0.25'
+          memory: 256M
+          cpus: '0.2'
     logging:
       driver: "json-file"
       options:
@@ -113,10 +113,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 128M
+          memory: 256M
           cpus: '0.25'
         reservations:
-          memory: 64M
+          memory: 128M
           cpus: '0.1'
     logging:
       driver: "json-file"
@@ -146,7 +146,6 @@ services:
       - --notification-email-delay=2
       - --stop-timeout=120s
     environment:
-      # Monthly updates (first Monday of month at 4 AM)
       - WATCHTOWER_SCHEDULE=${WATCHTOWER_SCHEDULE:-0 0 4 * * 1#1}
       - WATCHTOWER_TIMEOUT=${WATCHTOWER_TIMEOUT:-300}
       - TZ=${TZ:-UTC}
@@ -156,10 +155,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 128M
+          memory: 256M
           cpus: '0.25'
         reservations:
-          memory: 32M
+          memory: 64M
           cpus: '0.1'
     logging:
       driver: "json-file"
@@ -184,10 +183,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 64M
+          memory: 128M
           cpus: '0.1'
         reservations:
-          memory: 32M
+          memory: 64M
           cpus: '0.05'
     logging:
       driver: "json-file"
@@ -226,9 +225,7 @@ networks:
     ipam:
       driver: default
       config:
-        # FIX: Make subnet dynamic to avoid conflicts
         - subnet: 172.${shell echo $$ % 240 + 16}.0.0/24
     driver_opts:
-      # FIX: Make bridge name dynamic
       com.docker.network.bridge.name: ${COMPOSE_PROJECT_NAME:-vw}-br0
       com.docker.network.driver.mtu: 1500
