@@ -84,7 +84,9 @@ _validate_startup_prerequisites() {
 
     # Startup-specific validations
     if [[ ! -f "$ROOT_DIR/settings.json" ]] && [[ -z "${OCI_SECRET_OCID:-}" ]]; then
-        _log_error "No configuration found. Run ./tools/init-setup.sh first"
+        _log_error "No configuration found."
+        _log_info "This appears to be a fresh installation."
+        _log_info "Please run: sudo ./tools/init-setup.sh"
         return 1
     fi
 }
