@@ -75,15 +75,11 @@ temp/
 local.conf
 local.json
 
-# --- FIX: More specific ignore for Fail2ban ---
 # Ignore dynamic fail2ban files, but not all .local files
 fail2ban/db/
 fail2ban/fail2ban.log
 fail2ban/jail.d/00-firewalld.local
-fail2ban/filter.d/*.local
-fail2ban/action.d/*.local
 fail2ban/jail.local
-# --- END FIX ---
 
 # SSL certificates (except examples)
 ssl/
