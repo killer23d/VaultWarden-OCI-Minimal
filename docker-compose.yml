@@ -210,13 +210,13 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: ${PROJECT_STATE_DIR:-/var/lib/vaultwarden-oci-minimal}/caddy_data
+      device: ${PROJECT_STATE_DIR}/caddy_data
   caddy_config:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: ${PROJECT_STATE_DIR:-/var/lib/vaultwarden-oci-minimal}/caddy_config
+      device: ${PROJECT_STATE_DIR}/caddy_config
 
 networks:
   default:
