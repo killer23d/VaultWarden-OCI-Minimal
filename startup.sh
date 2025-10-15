@@ -178,9 +178,27 @@ _validate_service_health() {
         fi
 
         if [[ $i -eq $max_retries ]]; then
-            _log_error "VaultWarden failed to become healthy"
-            _show_troubleshooting_info
-            return 1
+            _log_error "VaultWarden failed to become healthy on the first attempt."
+            _log_info "Attempting a one-time automatic restart of the 'vaultwarden' service..."
+            
+            # Attempt a single restart
+            if docker compose restart vaultwarden &>/dev/null; then
+                _log_info "Restart command sent. Waiting for service to become healthy again..."
+                # Wait for a fixed period
+                sleep 20 
+                if docker compose ps --format json 2>/dev/null | jq -r ".[] | select(.Service==\"vaultwarden\") | .Health" 2>/dev/null | grep -q "healthy"; then
+                     _log_success "VaultWarden is now healthy after a restart."
+                     break # Exit the loop successfully
+                else
+                     _log_error "Service is still not healthy after restart."
+                     _show_troubleshooting_info
+                     return 1
+                fi
+            else
+                _log_error "Failed to issue restart command."
+                _show_troubleshooting_info
+                return 1
+            fi
         fi
         sleep $retry_delay
     done
@@ -204,7 +222,6 @@ _show_troubleshooting_info() {
     _log_info "  Check system resources: free -h && df -h"
     _log_info "  Validate configuration: ./startup.sh --validate"
     _log_info "  Force a full restart: docker compose down && ./startup.sh"
-    _log_info "  Reset all data (DANGER): docker compose down -v && ./startup.sh"
 }
 
 _display_service_info() {
