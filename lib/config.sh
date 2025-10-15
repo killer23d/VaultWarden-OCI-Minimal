@@ -102,21 +102,32 @@ _load_from_oci_vault() {
     local retry_delay=2
     
     for ((i=1; i<=max_retries; i++)); do
-        _log_debug "Attempting to fetch secret (attempt $i/$max_retries)"
-        
-        if secret_content=$(oci vault secret get-secret-bundle \
+        # Use the configured timeout from settings.json, defaulting to 15s
+        local oci_timeout="${OCI_VAULT_TIMEOUT:-15}"
+        _log_debug "Attempting to fetch secret (attempt $i/$max_retries, timeout: ${oci_timeout}s)"
+
+        # Wrap the OCI CLI call with the timeout command
+        if secret_content=$(timeout "${oci_timeout}" oci vault secret get-secret-bundle \
             --secret-id "$OCI_SECRET_OCID" \
             --query 'data."secret-bundle-content".content' \
             --raw-output 2>/dev/null); then
             
-            break
+            break # Success, exit the loop
         else
+            local exit_code=$?
+            # Exit code 124 specifically means the timeout was exceeded
+            if [[ $exit_code -eq 124 ]]; then
+                _log_warning "OCI Vault request timed out after ${oci_timeout}s."
+            else
+                _log_warning "Failed to fetch secret from OCI Vault (exit code: $exit_code)."
+            fi
+
             if [[ $i -eq $max_retries ]]; then
-                _log_error "Failed to fetch secret after $max_retries attempts"
+                _log_error "Failed to fetch secret after $max_retries attempts. Will now attempt fallback."
                 return 1
             fi
             
-            _log_warning "Failed to fetch secret, retrying in ${retry_delay}s..."
+            _log_info "Retrying in ${retry_delay}s..."
             sleep $retry_delay
         fi
     done
@@ -209,7 +220,7 @@ _parse_json_config() {
 # Export configuration as environment variables for docker-compose
 _export_configuration() {
     if [[ "$CONFIG_LOADED" != "true" ]]; then
-        _log_error "Configuration not loaded. Call _load_configuration first."
+        _log_error "Configuration not loaded. Call load_config first."
         return 1
     fi
     
@@ -244,7 +255,7 @@ _backup_current_config() {
         chmod 600 "$backup_file"
         _log_info "Configuration backed up to: $backup_file"
         
-        find "$CONFIG_BACKUP_DIR" -name "settings_*.json" -type f | 
+        find "$CONFIG_BACKUP_DIR" -name "settings_*.json" -type f | \
             sort -r | tail -n +11 | xargs -r rm -f
         
         return 0
@@ -347,7 +358,7 @@ validate_configuration() {
     if [[ -z "${CONFIG_VALUES[DOMAIN]:-}" ]]; then
         _log_error "Required configuration key missing: DOMAIN"
         ((errors++))
-    elif [[ ! "${CONFIG_VALUES[DOMAIN]}" =~ ^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+    elif [[ ! "${CONFIG_VALUES[DOMAIN]}" =~ ^https?://[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$ ]]; then
         _log_error "Invalid DOMAIN format: ${CONFIG_VALUES[DOMAIN]}"
         ((errors++))
     fi
@@ -358,7 +369,7 @@ validate_configuration() {
     fi
     
     if [[ -n "${CONFIG_VALUES[ADMIN_EMAIL]:-}" ]]; then
-        if [[ ! "${CONFIG_VALUES[ADMIN_EMAIL]}" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
+        if [[ ! "${CONFIG_VALUES[ADMIN_EMAIL]}" =~ ^[^@]+@[^@]+\\.[^@]+$ ]]; then
             _log_error "Invalid ADMIN_EMAIL format: ${CONFIG_VALUES[ADMIN_EMAIL]}"
             ((errors++))
         fi
@@ -391,5 +402,5 @@ else
     _log_warning "lib/config.sh should be sourced, not executed directly"
     echo "Testing configuration loading..."
     load_config
-    _display_config_summary
+    validate_configuration
 fi
