@@ -1,502 +1,775 @@
 # Security Guide
 
-## Overview
+> **🎯 Security Philosophy**: Defense in depth with automated hardening, continuous monitoring, and enterprise-grade protection suitable for small teams without security overhead.
 
-VaultWarden-OCI-Minimal implements a defense-in-depth security model appropriate for small team deployments. This guide explains the security measures, best practices, and configurations to ensure a secure deployment.
+## 🛡️ **Multi-Layer Security Architecture**
 
-## Security Architecture
+VaultWarden-OCI-Minimal implements **defense in depth** with multiple security layers that work together to protect your password manager deployment:
 
-### Defense Layers
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ Layer 1: Network Security                                       │
-│ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                │
-│ │ Cloudflare  │ │    UFW      │ │  Docker     │                │
-│ │ DDoS/WAF    │ │  Firewall   │ │  Network    │                │
-│ └─────────────┘ └─────────────┘ └─────────────┘                │
-└─────────────────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────────────┐
-│ Layer 2: Application Security                                   │
-│ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                │
-│ │    SSL/TLS  │ │ Fail2ban    │ │ VaultWarden │                │
-│ │   Caddy     │ │ Intrusion   │ │   Auth      │                │
-│ └─────────────┘ └─────────────┘ └─────────────┘                │
-└─────────────────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────────────┐
-│ Layer 3: Data Security                                          │
-│ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                │
-│ │ File Perms  │ │ Encryption  │ │   Secret    │                │
-│ │   600/755   │ │   Backups   │ │ Management  │                │
-│ └─────────────┘ └─────────────┘ └─────────────┘                │
-└─────────────────────────────────────────────────────────────────┘
+```bash
+Security Layers (Outside → Inside):
+├── CloudFlare Edge Protection (DDoS, Bot Detection, Geographic Filtering)
+├── UFW Host Firewall (Port Control, Connection Limiting)
+├── Fail2ban Intrusion Detection (Behavioral Analysis, Automatic Blocking)
+├── Container Security (Resource Limits, Non-root Execution)
+├── Application Security (Authentication, Authorization, Session Management)
+├── Data Security (Encryption, Secure Storage, Backup Protection)
+└── Configuration Security (File Permissions, Secret Management)
 ```
 
-## Network Security
+## 🌐 **Network Security**
 
-### Firewall Configuration (UFW)
+### **CloudFlare Edge Protection**
 
-The init-setup script automatically configures UFW with minimal required rules:
+#### **Automatic Configuration**
+The system automatically configures CloudFlare integration during setup:
+
+```bash
+# CloudFlare IP ranges updated daily via cron
+./tools/update-cloudflare-ips.sh
+
+# Generated configuration applied to Caddy
+cat caddy/cloudflare-ips.caddy
+
+# Trusted proxy configuration ensures real visitor IPs are detected
+```
+
+#### **CloudFlare Security Settings** (Manual Configuration Required)
+Access your CloudFlare dashboard and configure:
+
+**SSL/TLS Settings**:
+```bash
+SSL/TLS Mode: "Full (strict)"
+Always Use HTTPS: Enabled
+Minimum TLS Version: 1.2
+HSTS: Enabled (max-age: 31536000)
+```
+
+**Security Level**:
+```bash
+Security Level: "Medium" or "High"
+Bot Fight Mode: Enabled
+Challenge Passage: 30 minutes
+Browser Integrity Check: Enabled
+```
+
+**Rate Limiting** (Recommended Rules):
+```bash
+# Admin Panel Protection
+Path: /admin*
+Rate: 5 requests per minute per IP
+
+# Login Protection  
+Path: /identity/accounts/prelogin
+Rate: 10 requests per minute per IP
+
+# API Protection
+Path: /api/*
+Rate: 100 requests per minute per IP
+```
+
+#### **Geographic Access Control**
+```bash
+# Consider restricting access by country if applicable
+# CloudFlare → Security → WAF → Custom Rules
+# (country.code ne "US" and country.code ne "CA") → Block
+
+# For international teams, use allowlist instead:
+# (country.code in {"US" "CA" "GB" "DE"}) → Allow
+```
+
+### **Host Firewall (UFW)**
+
+#### **Automated Configuration**
+UFW is automatically configured during `init-setup.sh`:
 
 ```bash
 # Default policies
-ufw default deny incoming
-ufw default allow outgoing
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
 
-# Required services
-ufw allow ssh                    # SSH access (port 22)
-ufw allow 80/tcp                # HTTP (Caddy redirect to HTTPS)
-ufw allow 443/tcp               # HTTPS (main application access)
+# Essential services only
+sudo ufw allow ssh      # SSH access (port 22)
+sudo ufw allow 80/tcp   # HTTP (redirects to HTTPS)
+sudo ufw allow 443/tcp  # HTTPS (VaultWarden access)
+
+# Enable firewall
+sudo ufw --force enable
 ```
 
-### Cloudflare Integration
-
-#### DDoS Protection
-- **Automatic**: Built-in DDoS protection at Cloudflare edge
-- **Rate Limiting**: Configurable rate limits per IP/endpoint
-- **Geographic Blocking**: Block traffic from specific countries
-- **Bot Management**: Automatic bot detection and mitigation
-
-#### Web Application Firewall (WAF)
+#### **Firewall Status Verification**
 ```bash
-# Cloudflare WAF Rules (configure in dashboard)
-- Block common attack patterns
-- SQL injection protection  
-- XSS protection
-- File inclusion protection
-- Comment spam protection
+# Check firewall status
+sudo ufw status verbose
+
+# Expected output:
+# Status: active
+# Logging: on (low)
+# Default: deny (incoming), allow (outgoing)
+# New profiles: skip
+# 
+# To                         Action      From
+# --                         ------      ----
+# 22/tcp                     ALLOW IN    Anywhere
+# 80/tcp                     ALLOW IN    Anywhere
+# 443/tcp                    ALLOW IN    Anywhere
+
+# Monitor firewall logs
+sudo tail -f /var/log/ufw.log
 ```
 
-#### IP Allowlisting
-Caddy automatically restricts access to Cloudflare IPs only:
+#### **Advanced UFW Configuration**
+For enhanced security in sensitive environments:
+
 ```bash
-# Updated automatically by update-cloudflare-ips.sh
-remote_ip 173.245.48.0/20
-remote_ip 103.21.244.0/22
-# ... additional Cloudflare IP ranges
+# Rate limiting for SSH (prevent brute force)
+sudo ufw limit ssh
+
+# Specific IP allowlist for SSH (if feasible)
+sudo ufw delete allow ssh
+sudo ufw allow from YOUR_TRUSTED_IP to any port 22
+
+# Logging for security analysis
+sudo ufw logging medium
+
+# IPv6 support (if needed)
+# Edit /etc/default/ufw: IPV6=yes
 ```
 
-### Fail2ban Configuration
+### **Intrusion Detection (Fail2ban)**
 
-#### Automatic IP Blocking
-- **VaultWarden Protection**: Monitors authentication failures
-- **Caddy Protection**: Monitors proxy access logs
-- **SSH Protection**: Monitors SSH login attempts
-- **Custom Rules**: Configurable thresholds and ban times
+#### **Automated Jail Configuration**
+The system configures multiple fail2ban jails automatically:
 
-#### Cloudflare Integration
-When configured, banned IPs are also blocked at Cloudflare edge:
 ```bash
-# Configure in settings.json
-{
-  "CLOUDFLARE_EMAIL": "your-email@example.com",
-  "CLOUDFLARE_API_KEY": "your-global-api-key"
+# Active jails after setup
+sudo fail2ban-client status
+
+# Expected jails:
+# - sshd (SSH brute force protection)
+# - vaultwarden-auth (Login failure detection)
+# - vaultwarden-admin (Admin panel protection)
+# - caddy-json (HTTP access pattern analysis)
+# - caddy-404 (404 abuse detection)
+# - caddy-bad-bots (Bot detection)
+# - recidive (Repeat offender tracking)
+```
+
+#### **CloudFlare Integration**
+When CloudFlare credentials are configured, fail2ban automatically blocks IPs at the edge:
+
+```bash
+# Check CloudFlare action configuration
+cat fail2ban/action.d/cloudflare.conf
+
+# Verify credentials are configured
+grep -A 5 "\[Init\]" fail2ban/action.d/cloudflare.conf
+
+# Test CloudFlare API connectivity
+curl -X GET "https://api.cloudflare.com/client/v4/user/firewall/access_rules/rules" \
+     -H "X-Auth-Email: $(jq -r '.CLOUDFLARE_EMAIL' settings.json)" \
+     -H "X-Auth-Key: $(jq -r '.CLOUDFLARE_API_KEY' settings.json)" \
+     -H "Content-Type: application/json"
+```
+
+#### **Jail Configuration Details**
+
+**VaultWarden Authentication Protection**:
+```ini
+[vaultwarden-auth]
+enabled = true
+filter = vaultwarden
+logpath = /var/log/vaultwarden/vaultwarden.log
+ports = 80,443
+maxretry = 5       # Failed attempts before ban
+findtime = 10m     # Time window for attempts
+bantime = 2h       # Ban duration
+```
+
+**Admin Panel Protection** (More Strict):
+```ini
+[vaultwarden-admin]
+enabled = true
+filter = vaultwarden-admin
+logpath = /var/log/vaultwarden/vaultwarden.log
+ports = 80,443
+maxretry = 3       # Lower threshold for admin access
+findtime = 10m
+bantime = 6h       # Longer ban for admin attacks
+```
+
+**Recidivist Tracking** (Repeat Offenders):
+```ini
+[recidive]
+enabled = true
+filter = recidive
+logpath = /var/log/fail2ban.log
+bantime = 168h     # 1 week ban
+findtime = 24h
+maxretry = 3       # Previously banned IPs
+```
+
+#### **Monitoring Fail2ban Activity**
+```bash
+# Check current banned IPs
+sudo fail2ban-client status vaultwarden-auth
+sudo fail2ban-client status sshd
+
+# View fail2ban log
+sudo tail -f /var/log/fail2ban.log
+
+# Unban IP if needed (emergencies only)
+sudo fail2ban-client set vaultwarden-auth unbanip IP_ADDRESS
+
+# Get jail statistics
+sudo fail2ban-client get vaultwarden-auth stats
+```
+
+## 🔐 **Application Security**
+
+### **SSL/TLS Configuration**
+
+#### **Automatic Certificate Management**
+Caddy automatically handles SSL certificate provisioning and renewal:
+
+```bash
+# Certificate status
+docker compose exec caddy caddy list-certificates
+
+# Expected output shows:
+# - Valid Let's Encrypt certificate
+# - Automatic renewal configured
+# - OCSP stapling enabled
+
+# Force certificate renewal (if needed)
+docker compose exec caddy caddy certificates --renew
+```
+
+#### **Security Headers**
+Caddy is configured with comprehensive security headers:
+
+```caddy
+header {
+    # Remove server information
+    -Server
+    
+    # HSTS (HTTP Strict Transport Security)
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    
+    # Prevent MIME type sniffing
+    X-Content-Type-Options "nosniff"
+    
+    # Clickjacking protection
+    X-Frame-Options "DENY"
+    
+    # Referrer policy
+    Referrer-Policy "strict-origin-when-cross-origin"
+    
+    # Content Security Policy (Password Manager Optimized)
+    Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'self';"
 }
 ```
 
-## Application Security
-
-### SSL/TLS Configuration
-
-#### Automatic Certificate Management
-Caddy handles SSL certificates automatically:
-- **Let's Encrypt**: Automatic certificate provisioning
-- **Auto-Renewal**: Certificates renewed before expiration
-- **OCSP Stapling**: Improved certificate validation performance
-- **HTTP/2**: Modern protocol support
-
-#### Security Headers
+#### **SSL Configuration Verification**
 ```bash
-# Automatically configured by Caddy
-Strict-Transport-Security: max-age=31536000; includeSubDomains
-X-Content-Type-Options: nosniff
-X-Frame-Options: DENY
-X-XSS-Protection: 1; mode=block
-Referrer-Policy: strict-origin-when-cross-origin
-Content-Security-Policy: default-src 'self'
+# Test SSL configuration
+openssl s_client -connect your-domain.com:443 -servername your-domain.com < /dev/null 2>/dev/null | openssl x509 -noout -text
+
+# Check SSL Labs rating
+# Visit: https://www.ssllabs.com/ssltest/
+# Enter your domain - should achieve A+ rating
+
+# Verify HSTS header
+curl -I https://your-domain.com | grep -i strict-transport-security
 ```
 
-#### Cipher Suites
-Caddy uses secure defaults:
-- **TLS 1.2+**: Minimum supported version
-- **ECDHE**: Perfect forward secrecy
-- **AES-GCM**: Authenticated encryption
-- **ChaCha20-Poly1305**: Modern encryption for mobile devices
+### **Authentication Security**
 
-### VaultWarden Authentication
+#### **Admin Token Security**
+```bash
+# Admin token is automatically generated with high entropy
+# Length: 44 characters (base64 encoded 32 bytes)
+# Entropy: ~256 bits (cryptographically secure)
 
-#### Multi-Factor Authentication (MFA)
-- **TOTP**: Time-based one-time passwords
-- **WebAuthn**: Hardware security keys (YubiKey, etc.)
-- **Duo**: Integration with Duo Security (enterprise)
-- **Email**: Email-based 2FA (basic)
+# Verify admin token strength
+ADMIN_TOKEN=$(sudo jq -r '.ADMIN_TOKEN' settings.json)
+echo "Token length: ${#ADMIN_TOKEN}"
 
-#### Password Policies
+# Regenerate admin token (when needed)
+NEW_TOKEN=$(openssl rand -base64 32)
+sudo jq --arg token "$NEW_TOKEN" '.ADMIN_TOKEN = $token' settings.json > temp.json
+sudo mv temp.json settings.json
+sudo chmod 600 settings.json
+./startup.sh
+```
+
+#### **User Registration Controls**
+Configure user registration policy based on your security requirements:
+
 ```json
 {
-  "PASSWORD_ITERATIONS": 100000,
-  "PASSWORD_HINTS_ALLOWED": false,
-  "SHOW_PASSWORD_HINT": false,
-  "DOMAIN": "https://your-vault.com",
-  "SIGNUPS_ALLOWED": false
+  "SIGNUPS_ALLOWED": false,
+  "INVITATIONS_ALLOWED": true,
+  "INVITATION_EXPIRATION_HOURS": 120,
+  "DOMAIN_WHITELIST": "example.com,company.org"
 }
 ```
 
-#### Session Management
-- **Secure Cookies**: HttpOnly, Secure, SameSite attributes
-- **Session Timeout**: Configurable timeout periods
-- **Device Management**: Track and revoke device sessions
-- **IP Validation**: Optional IP-based session binding
+**Registration Security Options**:
+- **Closed**: `SIGNUPS_ALLOWED: false` - Admin creates all accounts
+- **Invite-only**: `INVITATIONS_ALLOWED: true` - Users can be invited
+- **Domain-restricted**: Use `DOMAIN_WHITELIST` to limit email domains
+- **Time-limited**: `INVITATION_EXPIRATION_HOURS` controls invite validity
 
-## Data Security
+#### **Password Policy Enforcement**
+VaultWarden enforces strong password policies by default:
 
-### File System Permissions
-
-#### Configuration Files
 ```bash
-# Sensitive configuration
-/path/to/project/settings.json                    (600, root:root)
-/etc/systemd/system/project-name.env             (600, root:root)
-/etc/caddy-extra/cloudflare-ips.caddy           (644, root:root)
+# Password requirements (enforced by VaultWarden):
+# - Minimum 8 characters (configurable in admin panel)
+# - Recommended: 12+ characters with mixed case, numbers, symbols
+# - No common passwords (dictionary check)
+# - Optional: Breach detection via HaveIBeenPwned API
 
-# Application directories
-/var/lib/project-name/                           (755, root:root)
-/var/lib/project-name/data/                      (755, 33:33)
-/var/lib/project-name/backups/                   (700, root:root)
-/var/lib/project-name/logs/                      (755, root:root)
+# Configure in admin panel:
+# https://your-domain.com/admin → General Settings → Password Settings
 ```
 
-#### Validation Script
+## 🗂️ **Data Security**
+
+### **File System Security**
+
+#### **Automated Permission Management**
+The system automatically applies secure permissions:
+
 ```bash
-#!/bin/bash
-# Check file permissions
-find /var/lib/project-name -type f -not -perm 600 -not -perm 644 -not -perm 755
-find /path/to/project -name "settings.json" -not -perm 600
+# Configuration files (sensitive data)
+settings.json: 600 (rw-------)
+fail2ban/action.d/cloudflare.conf: 600 (rw-------)
+/etc/systemd/system/*.env: 600 (rw-------)
+
+# Data directories
+/var/lib/*/: 755 (rwxr-xr-x)
+/var/lib/*/data/: 700 (rwx------)
+/var/lib/*/backups/: 700 (rwx------)
+
+# Executable scripts
+*.sh files: 755 (rwxr-xr-x)
 ```
 
-### Secret Management
-
-#### Local Configuration (settings.json)
-- **Encryption**: File encrypted at rest (optional)
-- **Permissions**: 600 (owner read/write only)
-- **Backup**: Automated versioned backups
-- **Validation**: JSON schema validation
-
-#### OCI Vault Integration
+#### **Permission Verification**
 ```bash
-# Environment setup
-export OCI_SECRET_OCID="ocid1.vaultsecret.oc1..."
+# Audit file permissions
+ls -la settings.json
+# Should show: -rw------- 1 root root
 
-# Automatic loading
-source lib/config.sh
-_load_configuration  # Loads from OCI Vault if OCID is set
+ls -ld /var/lib/*/data/
+# Should show: drwx------ 2 root root
+
+ls -ld /var/lib/*/backups/
+# Should show: drwx------ 2 root root
+
+# Fix permissions if needed
+sudo chmod 600 settings.json
+sudo chmod -R 700 /var/lib/*/data/
+sudo chmod -R 700 /var/lib/*/backups/
 ```
 
-#### Runtime Security
-- **Memory Only**: Secrets loaded into memory, not written to disk
-- **No Environment**: Secrets not exposed in process environment
-- **Automatic Cleanup**: Memory cleared on script exit
-- **Audit Trail**: Access logging in OCI Vault
+### **Database Security**
 
-### Backup Encryption
+#### **SQLite Security Configuration**
+VaultWarden is configured with secure SQLite settings:
 
-#### GPG Encryption
-All backups are encrypted using GPG:
 ```bash
-# Backup creation with encryption
-./tools/db-backup.sh
-# Creates: backup_20241014_120000.sql.gz.gpg
+# Database location (protected directory)
+DATABASE_URL="sqlite:///data/db.sqlite3"
 
-# Decryption (restore process)
-gpg --decrypt --batch --passphrase "$BACKUP_PASSPHRASE" backup.sql.gz.gpg | gunzip
+# SQLite security features enabled:
+# - WAL mode for better concurrency and crash safety
+# - Foreign key constraints enabled
+# - Secure delete to overwrite freed pages
+# - Automatic checkpointing for log management
+
+# Verify database security
+./tools/sqlite-maintenance.sh --security-check
 ```
 
-#### Encryption Configuration
-```json
-{
-  "BACKUP_PASSPHRASE": "generated-secure-passphrase",
-  "BACKUP_ENCRYPTION_CIPHER": "AES256",
-  "BACKUP_COMPRESSION": "gzip"
-}
-```
-
-## Container Security
-
-### Resource Isolation
-
-#### Memory Limits
-```yaml
-# Prevents memory exhaustion attacks
-services:
-  vaultwarden:
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 256M
-```
-
-#### CPU Limits
-```yaml
-# Prevents CPU starvation
-services:
-  vaultwarden:
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-        reservations:
-          cpus: '0.5'
-```
-
-#### Network Isolation
-```yaml
-# Isolated network per deployment
-networks:
-  default:
-    name: ${COMPOSE_PROJECT_NAME}_network
-    driver: bridge
-    internal: false  # Allows internet access
-```
-
-### Container Updates
-
-#### Automated Updates (Watchtower)
-```yaml
-# Secure update configuration
-watchtower:
-  command:
-    - --cleanup              # Remove old images
-    - --rolling-restart      # Zero-downtime updates
-    - --label-enable         # Only update labeled containers
-    - --stop-timeout=120s    # Graceful shutdown
-```
-
-#### Update Schedule
-- **Frequency**: Monthly (first Monday at 4 AM)
-- **Notifications**: Email alerts for updates
-- **Rollback**: Automatic rollback on health check failure
-- **Testing**: Staging environment recommended
-
-## Security Monitoring
-
-### Log Analysis
-
-#### Fail2ban Monitoring
+#### **Database Access Control**
 ```bash
-# Check banned IPs
-sudo fail2ban-client status vaultwarden
-sudo fail2ban-client status caddy
+# Database files are only accessible to VaultWarden container
+# Host access requires root privileges
 
-# View ban log
-tail -f /var/log/fail2ban.log
+# Check database file permissions
+sudo ls -la /var/lib/*/data/bwdata/db.sqlite3
+# Should show: -rw-r--r-- 1 root root (container manages access)
+
+# Database integrity verification
+./tools/sqlite-maintenance.sh --integrity-check
+
+# Enable database encryption at rest (if required)
+# Note: VaultWarden handles client-side encryption
+# Database encryption adds defense in depth but impacts performance
 ```
 
-#### VaultWarden Audit Logs
+### **Backup Security**
+
+#### **Encrypted Backup System**
+All backups are automatically encrypted:
+
 ```bash
-# Authentication events
-docker compose logs vaultwarden | grep -i "auth"
+# Backup encryption details:
+# - Algorithm: AES-256-GCM (authenticated encryption)
+# - Key derivation: PBKDF2 with random salt
+# - Compression: gzip before encryption
+# - Integrity: Built-in authentication tag
 
-# Admin panel access
-docker compose logs vaultwarden | grep -i "admin"
+# Verify backup encryption
+./tools/create-full-backup.sh --test-encryption
 
-# Failed login attempts
-docker compose logs vaultwarden | grep -i "failed"
+# Backup passphrase management
+BACKUP_PASSPHRASE=$(sudo jq -r '.BACKUP_PASSPHRASE' settings.json)
+echo "Passphrase entropy: $(echo -n "$BACKUP_PASSPHRASE" | wc -c) characters"
 ```
 
-#### Caddy Access Logs
+#### **Secure Backup Storage**
 ```bash
-# Access patterns
-tail -f /var/lib/project-name/logs/caddy/access.log
+# Backup directory permissions
+sudo ls -ld /var/lib/*/backups/
+# Should show: drwx------ (only root access)
 
-# Error analysis
-tail -f /var/lib/project-name/logs/caddy/error.log
+# Backup file integrity verification
+./tools/restore.sh --verify-all
 
-# Security events
-grep "403\|404\|429" /var/lib/project-name/logs/caddy/access.log
+# Off-site backup recommendations:
+# 1. Encrypt backups before cloud storage
+# 2. Use separate encryption key for cloud storage
+# 3. Test restore procedures regularly
+# 4. Implement backup rotation policy
 ```
 
-### Security Metrics
+## 🔧 **Configuration Security**
 
-#### Health Monitoring
-The monitoring system tracks security-relevant metrics:
-- **Failed Authentication Attempts**: Rate and patterns
-- **Unusual Access Patterns**: Geographic or time-based anomalies
-- **Resource Usage**: Potential DoS indicators
-- **Certificate Status**: SSL certificate validity and renewal
+### **Secret Management**
 
-#### Alerting Thresholds
+#### **Local Secret Management**
 ```bash
-# Configure in monitoring script
-FAILED_AUTH_THRESHOLD=10      # Per 5-minute window
-RESOURCE_USAGE_THRESHOLD=80   # CPU/Memory percentage
-DISK_USAGE_THRESHOLD=90       # Disk space percentage
-CERT_EXPIRY_WARNING=30        # Days before expiration
+# Configuration file security
+settings.json:
+- Location: Project root directory
+- Permissions: 600 (owner read/write only)
+- Format: JSON with validation
+- Backup: Automatic versioned backups before changes
+
+# Secret rotation procedures
+# 1. Generate new secrets
+NEW_ADMIN_TOKEN=$(openssl rand -base64 32)
+NEW_BACKUP_PASSPHRASE=$(openssl rand -base64 32)
+
+# 2. Update configuration
+sudo jq --arg admin "$NEW_ADMIN_TOKEN" --arg backup "$NEW_BACKUP_PASSPHRASE" \
+  '.ADMIN_TOKEN = $admin | .BACKUP_PASSPHRASE = $backup' settings.json > temp.json
+sudo mv temp.json settings.json
+sudo chmod 600 settings.json
+
+# 3. Restart services
+./startup.sh
 ```
 
-## Incident Response
+#### **OCI Vault Integration** (Enterprise)
+For enhanced secret management with OCI Vault:
 
-### Security Event Classification
-
-#### Critical (Immediate Response)
-- **Successful Breach**: Unauthorized admin access
-- **Data Exfiltration**: Unusual data export patterns
-- **System Compromise**: Container or host compromise
-- **DDoS Attack**: Service unavailability
-
-#### High (4-hour Response)
-- **Multiple Failed Logins**: Potential brute force
-- **Suspicious Access Patterns**: Unusual geographic access
-- **Certificate Issues**: SSL certificate problems
-- **Resource Exhaustion**: System performance impact
-
-#### Medium (24-hour Response)
-- **Failed Authentication**: Single failed login attempts
-- **Rate Limiting**: Automatic rate limit triggers
-- **Update Failures**: Automated update failures
-- **Backup Issues**: Backup creation or validation failures
-
-### Response Procedures
-
-#### Immediate Actions
-1. **Isolate**: Block suspicious IPs via Cloudflare or fail2ban
-2. **Assess**: Determine scope and impact of incident
-3. **Contain**: Prevent further unauthorized access
-4. **Preserve**: Secure logs and evidence for investigation
-
-#### Investigation Steps
-1. **Log Analysis**: Review all relevant log files
-2. **Timeline**: Establish sequence of events
-3. **Impact Assessment**: Determine what data/systems were affected
-4. **Root Cause**: Identify how the incident occurred
-
-#### Recovery Actions
-1. **Secure**: Close attack vectors and patch vulnerabilities
-2. **Restore**: Restore systems/data from clean backups if needed
-3. **Monitor**: Enhanced monitoring during recovery period
-4. **Validate**: Ensure systems are clean and functioning properly
-
-## Security Best Practices
-
-### Admin User Management
-
-#### Admin Account Security
-- **Strong Password**: Use password manager for admin password
-- **MFA Required**: Enable multi-factor authentication
-- **Regular Rotation**: Change admin token quarterly
-- **Access Logging**: Monitor all admin panel access
-
-#### User Management
 ```bash
-# Disable user registration
-"SIGNUPS_ALLOWED": false
+# OCI Vault benefits:
+# - Centralized secret management
+# - Automatic secret rotation
+# - Audit logging for secret access
+# - Hardware security module (HSM) backing
+# - Fine-grained access controls
 
-# Require email verification
-"SIGNUPS_VERIFY": true
+# Setup OCI Vault integration
+./tools/oci-setup.sh
 
-# Limit org invitations
-"INVITATIONS_ALLOWED": true
-"INVITATION_EXPIRATION_HOURS": 120
+# Verify OCI Vault connectivity
+oci vault secret get-secret-bundle --secret-id "$OCI_SECRET_OCID"
+
+# Fallback mechanism ensures high availability
+# If OCI Vault is unavailable, system falls back to local settings.json
 ```
 
-### Network Security
+### **Environment Security**
 
-#### SSH Hardening
+#### **Container Security**
 ```bash
-# /etc/ssh/sshd_config recommendations
-PermitRootLogin no
-PasswordAuthentication no
-PubkeyAuthentication yes
-MaxAuthTries 3
-ClientAliveInterval 300
-ClientAliveCountMax 2
+# Container security features:
+# - Non-root user execution where possible
+# - Read-only filesystems for system containers
+# - Resource limits prevent DoS attacks
+# - Minimal attack surface (no unnecessary packages)
+# - Regular security updates via Watchtower
+
+# Verify container security
+docker compose exec vaultwarden ps aux
+# Should show VaultWarden running as non-root user
+
+# Check resource limits
+docker stats --no-stream
+# Should show memory and CPU limits enforced
 ```
 
-#### Cloudflare Security Settings
-- **Security Level**: High or I'm Under Attack mode
-- **Challenge Passage**: 30 minutes
-- **Browser Integrity Check**: Enabled
-- **Always Use HTTPS**: Enabled
-- **Minimum TLS Version**: 1.2
-- **Opportunistic Encryption**: Enabled
-
-### Backup Security
-
-#### Secure Backup Storage
-- **Encryption**: Always encrypt backups before storage
-- **Access Control**: Limit access to backup storage
-- **Geographic Separation**: Store backups in different region
-- **Regular Testing**: Test backup restoration monthly
-
-#### Backup Validation
+#### **Network Security**
 ```bash
-# Automated backup validation
-./tools/db-backup.sh --validate
-./tools/create-full-backup.sh --test-restore
+# Container network isolation
+# - Project-specific bridge network
+# - No host network access except fail2ban (required)
+# - Internal DNS resolution only
+# - No unnecessary port exposure
+
+# Verify network isolation
+docker network ls | grep $(basename $(pwd))
+docker network inspect $(basename $(pwd))_network
 ```
 
-### System Hardening
+## 🔍 **Security Monitoring**
 
-#### Operating System
+### **Log-Based Security Monitoring**
+
+#### **Security Event Logging**
 ```bash
-# Automatic security updates
-sudo apt install unattended-upgrades
-sudo dpkg-reconfigure unattended-upgrades
+# Centralized security logging locations:
+/var/lib/*/logs/fail2ban/     # Intrusion detection
+/var/lib/*/logs/vaultwarden/  # Authentication events
+/var/lib/*/logs/caddy/        # Access logs and security events
+/var/log/ufw.log              # Firewall events
+/var/log/auth.log             # SSH and system authentication
 
-# Disable unnecessary services
-sudo systemctl disable bluetooth cups avahi-daemon
-
-# Enable audit logging
-sudo apt install auditd
-sudo systemctl enable auditd
+# Key security events to monitor:
+# - Multiple failed login attempts
+# - Admin panel access from new IPs
+# - Unusual geographic access patterns
+# - Failed SSH attempts
+# - Large file downloads (potential data exfiltration)
 ```
 
-#### Docker Security
+#### **Automated Security Monitoring**
 ```bash
-# Docker daemon security
-{
-  "live-restore": true,
-  "userland-proxy": false,
-  "no-new-privileges": true,
-  "log-driver": "json-file",
-  "log-opts": {
-    "max-size": "10m",
-    "max-file": "3"
-  }
-}
+# Security monitoring via cron (every 5 minutes)
+./tools/monitor.sh --security-check
+
+# Security checks performed:
+# - Failed authentication analysis
+# - Suspicious IP address detection
+# - Certificate expiration monitoring
+# - Unusual resource usage patterns
+# - Configuration file integrity verification
+
+# Review security monitoring logs
+journalctl -t monitor | grep -i security
 ```
 
-## Compliance Considerations
+### **Intrusion Detection Analysis**
 
-### Data Protection
-
-#### GDPR Compliance
-- **Data Minimization**: Only collect necessary data
-- **Right to Erasure**: Ability to delete user data
-- **Data Portability**: Export user data in standard formats
-- **Audit Trail**: Log all data access and modifications
-
-#### Data Retention
+#### **Fail2ban Reporting**
 ```bash
-# Configurable retention periods
-BACKUP_RETENTION_DAYS=30
-LOG_RETENTION_DAYS=90
-AUDIT_RETENTION_DAYS=365
+# Generate fail2ban activity report
+sudo fail2ban-client get vaultwarden-auth stats
+
+# Check for patterns indicating coordinated attacks
+sudo grep "Ban " /var/log/fail2ban.log | tail -20
+
+# Geographic analysis of banned IPs (requires geoip)
+# sudo apt install geoip-bin geoip-database
+# sudo grep "Ban " /var/log/fail2ban.log | awk '{print $NF}' | sort | uniq | xargs -I {} geoiplookup {}
 ```
 
-### Security Standards
+#### **Access Pattern Analysis**
+```bash
+# Analyze access patterns from Caddy logs
+sudo tail -1000 /var/lib/*/logs/caddy/access.log | \
+  jq -r '.request.remote_addr' | sort | uniq -c | sort -nr | head -20
 
-#### Industry Best Practices
-- **NIST Cybersecurity Framework**: Identify, Protect, Detect, Respond, Recover
-- **CIS Controls**: Implementation of relevant CIS security controls
-- **OWASP Top 10**: Protection against common web application vulnerabilities
-- **ISO 27001**: Information security management principles
+# Check for unusual user agents
+sudo tail -1000 /var/lib/*/logs/caddy/access.log | \
+  jq -r '.request.headers["User-Agent"][0]' | sort | uniq -c | sort -nr
 
-#### Regular Security Reviews
-- **Monthly**: Review failed authentication logs
-- **Quarterly**: Update security configurations and test backups
-- **Annually**: Full security audit and penetration testing
-- **Continuous**: Automated security monitoring and alerting
+# Monitor admin panel access
+sudo grep '/admin' /var/lib/*/logs/caddy/access.log | tail -20
+```
 
-This security guide ensures that VaultWarden-OCI-Minimal maintains strong security posture appropriate for small team deployments while remaining manageable and not over-engineered.
+## 🎯 **Security Best Practices**
+
+### **Operational Security**
+
+#### **Regular Security Tasks**
+```bash
+# Daily (automated via cron):
+# - Review fail2ban activity
+# - Check SSL certificate status
+# - Monitor resource usage for anomalies
+# - Verify backup completion and integrity
+
+# Weekly (manual review recommended):
+# - Analyze access logs for patterns
+# - Review user account activity
+# - Check for VaultWarden security updates
+# - Verify CloudFlare security settings
+
+# Monthly (maintenance):
+# - Rotate admin tokens
+# - Update fail2ban filters if needed
+# - Review and test backup/restore procedures
+# - Audit user accounts and permissions
+```
+
+#### **Incident Response Procedures**
+```bash
+# Security incident response checklist:
+
+# 1. Immediate containment
+docker compose down                    # Stop services if compromised
+sudo fail2ban-client set jail banip IP # Block suspicious IPs
+
+# 2. Assessment
+./tools/create-full-backup.sh --forensic # Create forensic backup
+sudo grep -r "suspicious_pattern" /var/lib/*/logs/ # Analyze logs
+
+# 3. Recovery
+./tools/restore.sh /path/to/clean/backup # Restore from clean backup
+./startup.sh                            # Restart with monitoring
+
+# 4. Post-incident
+# - Update security configurations based on attack vectors
+# - Document incident and response for future reference
+# - Consider additional security measures if needed
+```
+
+### **Compliance and Audit**
+
+#### **Security Audit Checklist**
+```bash
+# Use this checklist for regular security audits:
+
+# Infrastructure Security:
+- [ ] UFW firewall active with minimal ports open
+- [ ] Fail2ban active with all jails functioning
+- [ ] SSL/TLS A+ rating on SSL Labs test
+- [ ] CloudFlare security features enabled
+- [ ] All containers running with resource limits
+
+# Access Control:
+- [ ] Admin token rotated within last 90 days
+- [ ] User registration policy appropriate for organization
+- [ ] No unnecessary user accounts exist
+- [ ] SSH keys rotated and access reviewed
+
+# Data Protection:
+- [ ] Database encrypted in transit and at rest
+- [ ] Backups encrypted and tested within last 30 days
+- [ ] File permissions secure on all sensitive files
+- [ ] Off-site backup tested within last quarter
+
+# Monitoring:
+- [ ] Security monitoring cron jobs active
+- [ ] Log retention policy implemented
+- [ ] Incident response procedures documented
+- [ ] Security contact information current
+```
+
+#### **Compliance Documentation**
+```bash
+# Generate compliance report
+./tools/monitor.sh --compliance-report
+
+# Security configuration export (for audits)
+./tools/security-audit.sh --export-config
+
+# Log retention verification
+find /var/lib/*/logs -name "*.log" -mtime +90 -ls
+# Should show logs older than 90 days for compliance verification
+```
+
+## 🚨 **Emergency Security Procedures**
+
+### **Compromise Response**
+
+#### **Immediate Actions**
+```bash
+# If you suspect system compromise:
+
+# 1. Isolate the system
+sudo ufw deny in
+docker compose down
+
+# 2. Preserve evidence
+./tools/create-full-backup.sh --forensic --preserve-logs
+
+# 3. Assess damage
+sudo grep -r "malicious_pattern" /var/lib/*/logs/
+sudo find /var/lib/*/data -name "*.suspicious" -ls
+
+# 4. Clean recovery
+./tools/restore.sh --verify /path/to/known-good-backup
+./startup.sh
+```
+
+#### **Security Hardening Post-Incident**
+```bash
+# Additional hardening measures post-incident:
+
+# 1. Force password reset for all users
+# (Done through admin panel)
+
+# 2. Rotate all secrets
+openssl rand -base64 32  # New admin token
+openssl rand -base64 32  # New backup passphrase
+
+# 3. Enhanced monitoring
+# Enable verbose logging temporarily
+export DEBUG=1
+
+# 4. Additional fail2ban protection
+# Lower thresholds temporarily
+sudo fail2ban-client set vaultwarden-auth maxretry 3
+sudo fail2ban-client set vaultwarden-auth bantime 86400  # 24 hours
+
+# 5. Review and update security policies
+# Document lessons learned and update procedures
+```
+
+## 📚 **Security Resources**
+
+### **Security References**
+- **VaultWarden Security**: [Official Security Documentation](https://github.com/dani-garcia/vaultwarden/wiki/Security)
+- **Bitwarden Security**: [Bitwarden Security Whitepaper](https://bitwarden.com/help/bitwarden-security-white-paper/)
+- **CloudFlare Security**: [CloudFlare Security Center](https://www.cloudflare.com/security/)
+- **OWASP Guidelines**: [OWASP Application Security](https://owasp.org/www-project-top-ten/)
+
+### **Security Tools**
+```bash
+# Built-in security validation tools
+./startup.sh --validate          # Configuration security check
+./tools/monitor.sh --security    # Security monitoring
+./tools/security-audit.sh        # Comprehensive security audit
+
+# External security testing tools
+# SSL Labs: https://www.ssllabs.com/ssltest/
+# SecurityHeaders: https://securityheaders.com/
+# Mozilla Observatory: https://observatory.mozilla.org/
+```
+
+### **Staying Updated**
+```bash
+# Security update monitoring (automated)
+# Watchtower handles container security updates
+
+# Manual security monitoring
+# Subscribe to:
+# - VaultWarden security advisories
+# - Docker security bulletins  
+# - Ubuntu security updates
+# - CloudFlare security blog
+
+# Security mailing lists and notifications
+# Configure email notifications for critical security events
+```
+
+This security guide provides comprehensive protection suitable for small teams while maintaining the "set and forget" operational model through automation and careful configuration."""
