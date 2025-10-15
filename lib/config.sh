@@ -1,15 +1,5 @@
 #!/usr/bin/env bash
 # lib/config.sh - Configuration management with OCI Vault and systemd support
-# Part of VaultWarden OCI Minimal stack
-#
-# This library provides centralized configuration management with support for:
-# - Local settings.json files
-# - OCI Vault integration for cloud deployments
-# - Systemd environment file management
-# - Automatic service name and path detection
-#
-# Dependencies: lib/logging.sh, lib/validation.sh
-#
 
 set -euo pipefail
 
@@ -310,57 +300,6 @@ get_config_value() {
     fi
 }
 
-# Set configuration value (in memory only)
-_set_config_value() {
-    local key="$1"
-    local value="$2"
-    
-    if [[ -z "$key" ]] || [[ -z "$value" ]]; then
-        _log_error "Both key and value must be provided"
-        return 1
-    fi
-    
-    CONFIG_VALUES["$key"]="$value"
-    _log_debug "Configuration updated: $key"
-}
-
-# Display configuration summary (without sensitive values)
-_display_config_summary() {
-    if [[ "$CONFIG_LOADED" != "true" ]]; then
-        _log_error "Configuration not loaded"
-        return 1
-    fi
-    
-    _log_info "Configuration Summary:"
-    _log_info "  Project: $PROJECT_NAME"
-    _log_info "  Source: $CONFIG_SOURCE"
-    _log_info "  Keys loaded: ${#CONFIG_VALUES[@]}"
-    
-    local safe_keys=("DOMAIN" "SMTP_HOST" "SMTP_FROM" "DATABASE_URL")
-    for key in "${safe_keys[@]}"; do
-        if [[ -n "${CONFIG_VALUES[$key]:-}" ]]; then
-            _log_info "  $key: ${CONFIG_VALUES[$key]}"
-        fi
-    done
-    
-    local sensitive_keys=("ADMIN_TOKEN" "SMTP_PASSWORD" "BACKUP_PASSPHRASE")
-    for key in "${sensitive_keys[@]}"; do
-        if [[ -n "${CONFIG_VALUES[$key]:-}" ]]; then
-            _log_info "  $key: [REDACTED]"
-        fi
-    done
-}
-
-# Get dynamic paths for use by other scripts
-_get_project_paths() {
-    echo "PROJECT_NAME=$PROJECT_NAME"
-    echo "PROJECT_STATE_DIR=$PROJECT_STATE_DIR"
-    echo "CONFIG_BACKUP_DIR=$CONFIG_BACKUP_DIR"
-    echo "SYSTEMD_ENV_FILE=$SYSTEMD_ENV_FILE"
-    echo "SERVICE_NAME=$SERVICE_NAME"
-    echo "PROJECT_URL=$PROJECT_URL"
-}
-
 # Main configuration loading function
 load_config() {
     _log_debug "Initializing configuration system..."
@@ -368,7 +307,9 @@ load_config() {
     
     _load_systemd_environment
     
+    local oci_expected=false
     if [[ -n "${OCI_SECRET_OCID:-}" ]]; then
+        oci_expected=true
         _log_debug "OCI_SECRET_OCID detected, using OCI Vault"
         if _load_from_oci_vault; then
             _export_configuration
@@ -381,6 +322,11 @@ load_config() {
     
     _log_debug "Using local configuration file"
     if _load_from_local_file; then
+        # Validate that local config is not stale if OCI was expected
+        if [[ "$oci_expected" == "true" ]]; then
+            _log_warning "Using potentially stale local configuration due to OCI Vault unavailability"
+            _log_info "Consider running ./tools/oci-setup.sh to verify cloud configuration"
+        fi
         _export_configuration
         return 0
     else
@@ -445,5 +391,5 @@ else
     _log_warning "lib/config.sh should be sourced, not executed directly"
     echo "Testing configuration loading..."
     load_config
-    display_config_summary
+    _display_config_summary
 fi

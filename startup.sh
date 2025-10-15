@@ -47,7 +47,7 @@ _startup_workflow() {
 
     # Step 2: Configuration loading
     _log_info "Loading configuration..."
-    if ! _load_configuration; then
+    if ! load_config; then
         _log_error "Failed to load configuration"
         return 1
     fi
@@ -131,7 +131,7 @@ _execute_pre_startup_tasks() {
     local cf_script="$ROOT_DIR/tools/update-cloudflare-ips.sh"
     if [[ -x "$cf_script" ]]; then
         _log_debug "Updating Cloudflare IP ranges..."
-        if ! timeout 30 "$cf_script" --quiet 2>/dev/null; then
+        if ! timeout "${CLOUDFLARE_UPDATE_TIMEOUT:-30}" "$cf_script" --quiet 2>/dev/null; then
             _log_warning "Failed to update Cloudflare IPs, continuing with existing config"
         else
             _log_success "Cloudflare IPs updated successfully"
@@ -142,7 +142,7 @@ _execute_pre_startup_tasks() {
         local ddns_script="$ROOT_DIR/tools/render-ddclient-conf.sh"
         if [[ -x "$ddns_script" ]]; then
             _log_debug "Rendering DDNS configuration..."
-            if ! timeout 15 "$ddns_script" "$ROOT_DIR/templates/ddclient.conf.tmpl" "$ROOT_DIR/ddclient/ddclient.conf" 2>/dev/null; then
+            if ! timeout "${OCI_VAULT_TIMEOUT:-15}" "$ddns_script" "$ROOT_DIR/templates/ddclient.conf.tmpl" "$ROOT_DIR/ddclient/ddclient.conf" 2>/dev/null; then
                 _log_warning "Failed to render DDNS config, container will use environment variables"
             fi
         fi
@@ -168,7 +168,7 @@ _validate_service_health() {
     local max_retries=30
     local retry_delay=2
     local vaultwarden_service_name
-    vaultwarden_service_name=$(get_config_value "CONTAINER_NAME_VAULTWARDEN" || echo "vaultwarden")
+    vaultwarden_service_name=$(get_config_value "CONTAINER_NAME_VAULTWARDEN" || echo "${COMPOSE_PROJECT_NAME}_vaultwarden")
 
     _log_debug "Waiting for $vaultwarden_service_name to be healthy..."
     for ((i=1; i<=max_retries; i++)); do
@@ -187,7 +187,7 @@ _validate_service_health() {
 
     local critical_services=("caddy" "fail2ban")
     for service in "${critical_services[@]}"; do
-        if docker compose ps --format json 2>/dev/null | jq -r ".[] | select(.Service==\"$service\") | .State" 2>/dev/null | grep -q "running"; then
+        if _compose_service_running "$service"; then
             _log_success "$service is running"
         else
             _log_warning "$service is not running properly"
@@ -256,8 +256,8 @@ EOM
     --validate)
         _log_header "$PROJECT_NAME Configuration Validation"
         _validate_startup_prerequisites
-        _load_configuration
-        _validate_configuration
+        load_config
+        validate_configuration
         _log_success "Validation completed successfully"
         exit 0
         ;;

@@ -26,42 +26,14 @@ _set_log_prefix "init"
 readonly REQUIRED_PACKAGES=("docker.io" "docker-compose-plugin" "jq" "curl" "openssl")
 readonly OPTIONAL_PACKAGES=("fail2ban" "ufw" "gettext" "nftables")
 
-_validate_script_permissions() {
-    _log_section "Validating Script Permissions"
-    local errors=0
-    local scripts_to_check=(
-        "$ROOT_DIR/startup.sh"
-        "$ROOT_DIR/tools/monitor.sh"
-        "$ROOT_DIR/tools/db-backup.sh"
-        "$ROOT_DIR/tools/create-full-backup.sh"
-        "$ROOT_DIR/tools/restore.sh"
-        "$ROOT_DIR/tools/sqlite-maintenance.sh"
-        "$ROOT_DIR/tools/update-cloudflare-ips.sh"
-        "$ROOT_DIR/tools/render-ddclient-conf.sh"
-        "$ROOT_DIR/tools/oci-setup.sh"
-        "$ROOT_DIR/tools/update-secrets.sh"
-    )
-
-    for script in "${scripts_to_check[@]}"; do
-        if [[ ! -x "$script" ]]; then
-            _log_warning "Script not executable: $script - fixing automatically"
-            if chmod +x "$script"; then
-                _log_success "Fixed permissions for: $script"
-            else
-                _log_error "Failed to fix permissions for: $script"
-                ((errors++))
-            fi
-        else
-            _log_debug "Script is executable: $script"
-        fi
-    done
-
-    if [[ $errors -gt 0 ]]; then
-        _log_error "Could not fix all script permissions. Please correct them manually and run again."
-        exit 1
-    fi
-    _log_success "All scripts are executable."
+# Automatically fix script permissions
+_auto_fix_script_permissions() {
+    _log_section "Checking and Fixing Script Permissions"
+    local script_dir="$ROOT_DIR"
+    find "$script_dir" -name "*.sh" -type f ! -path "*/.*" -exec chmod +x {} \;
+    _log_success "All script permissions automatically corrected."
 }
+
 
 # Parse command line arguments first
 AUTO_MODE=false
@@ -109,7 +81,7 @@ _init_setup_workflow() {
     _print_key_value "Mode" "$([ "$AUTO_MODE" == "true" ] && echo "Automated" || echo "Interactive")"
     echo
 
-    _validate_script_permissions
+    _auto_fix_script_permissions
     _validate_system_requirements
     _install_required_packages
     _setup_docker_environment
@@ -267,6 +239,9 @@ EOF
         local backup_cron="/tmp/crontab-backup-$(date +%Y%m%d_%H%M%S)"
         crontab -l > "$backup_cron"
         _log_info "Existing crontab backed up to: $backup_cron"
+        
+        # Remove existing VaultWarden entries before adding new ones to prevent duplication
+        crontab -l | grep -v "# ${PROJECT_NAME} -" | grep -v "${project_root}" | crontab -
         (crontab -l; echo; cat "$cron_file") | crontab -
     else
         crontab "$cron_file"
@@ -438,10 +413,13 @@ _create_configuration_file() {
   "LOG_LEVEL": "warn",
   "BACKUP_KEEP_DB": 30,
   "BACKUP_KEEP_FULL": 8,
-  "VAULTWARDEN_MEMORY_LIMIT": "2G",
-  "VAULTWARDEN_MEMORY_RESERVATION": "512M",
-  "CADDY_MEMORY_LIMIT": "512M",
-  "FAIL2BAN_MEMORY_LIMIT": "256M"
+  "VAULTWARDEN_MEMORY_LIMIT": "1536M",
+  "VAULTWARDEN_MEMORY_RESERVATION": "768M",
+  "CADDY_MEMORY_LIMIT": "256M",
+  "FAIL2BAN_MEMORY_LIMIT": "128M",
+  "NETWORK_TIMEOUT": "30",
+  "CLOUDFLARE_UPDATE_TIMEOUT": "30",
+  "OCI_VAULT_TIMEOUT": "15"
 }
 EOF
 
