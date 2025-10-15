@@ -173,12 +173,12 @@ _detect_database_path() {
 
     if [[ "$db_url" =~ ^sqlite://(.+) ]]; then
         local relative_path="${BASH_REMATCH[1]}"
-        if [[ "$relative_path" != /* ]]; then
-            DB_PATH="$ROOT_DIR/$relative_path"
-        else
-            DB_PATH="$relative_path"
-        fi
-        _log_info "Detected database path from config: $DB_PATH"
+        # The path inside the container is /data/db.sqlite3, which maps to a host path.
+        # The config.sh logic correctly determines PROJECT_STATE_DIR.
+        # We need to construct the host path correctly.
+        # The docker-compose volume is: ${PROJECT_STATE_DIR}/data/bwdata:/data
+        DB_PATH="${PROJECT_STATE_DIR}/data/bwdata/db.sqlite3"
+        _log_info "Detected database path on host: $DB_PATH"
     else
         _log_error "Unsupported DATABASE_URL format: $db_url"
         _log_info "Only sqlite:///... URLs are supported for auto-detection."
@@ -198,7 +198,7 @@ _manage_service_state() {
 
     case "$action" in
         "status")
-            if docker ps --format "table {{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
+            if docker ps --format "table {{.Names}}" | grep -q "^${CONTAINER_NAME}"; then
                 echo "running"
             else
                 echo "stopped"
@@ -242,11 +242,11 @@ _run_integrity_check() {
     local db_path="$1"
     _log_info "Running database integrity check..."
     if [[ "$DRY_RUN" == "true" ]]; then
-        _log_info "[DRY RUN] Would run: sqlite3 \"$db_path\" \"PRAGMA integrity_check;\""
+        _log_info "[DRY RUN] Would run: sqlite3 \"$db_path\" \"PRAGMA busy_timeout = 30000; PRAGMA integrity_check;\""
         return 0
     fi
     local integrity_result; local start_time; start_time=$(date +%s)
-    integrity_result=$(sqlite3 "$db_path" "PRAGMA integrity_check;" 2>&1)
+    integrity_result=$(sqlite3 "$db_path" "PRAGMA busy_timeout = 30000; PRAGMA integrity_check;" 2>&1)
     local exit_code=$?; local end_time; end_time=$(date +%s); local duration=$((end_time - start_time))
     if [[ $exit_code -eq 0 && "$integrity_result" == "ok" ]]; then
         _log_success "Database integrity check passed (${duration}s)"; return 0
@@ -261,10 +261,10 @@ _run_vacuum() {
     local size_before; size_before=$(du -h "$db_path" 2>/dev/null | cut -f1 || echo "unknown")
     _log_info "Database size before vacuum: $size_before"
     if [[ "$DRY_RUN" == "true" ]]; then
-        _log_info "[DRY RUN] Would run: sqlite3 \"$db_path\" \"VACUUM;\""; return 0
+        _log_info "[DRY RUN] Would run: sqlite3 \"$db_path\" \"PRAGMA busy_timeout = 30000; VACUUM;\""; return 0
     fi
     local start_time; start_time=$(date +%s); local vacuum_result
-    if vacuum_result=$(timeout 600 sqlite3 "$db_path" "VACUUM;" 2>&1); then
+    if vacuum_result=$(timeout 600 sqlite3 "$db_path" "PRAGMA busy_timeout = 30000; VACUUM;" 2>&1); then
         local end_time; end_time=$(date +%s); local duration=$((end_time - start_time)); local size_after
         size_after=$(du -h "$db_path" 2>/dev/null | cut -f1 || echo "unknown")
         _log_success "Database vacuum completed (${duration}s)"; _log_info "Database size after vacuum: $size_after"; return 0
@@ -278,10 +278,10 @@ _run_analyze() {
     local db_path="$1"
     _log_info "Updating database statistics and optimizing indexes..."
     if [[ "$DRY_RUN" == "true" ]]; then
-        _log_info "[DRY RUN] Would run: sqlite3 \"$db_path\" \"ANALYZE;\""; return 0
+        _log_info "[DRY RUN] Would run: sqlite3 \"$db_path\" \"PRAGMA busy_timeout = 30000; ANALYZE;\""; return 0
     fi
     local start_time; start_time=$(date +%s); local analyze_result
-    if analyze_result=$(sqlite3 "$db_path" "ANALYZE;" 2>&1); then
+    if analyze_result=$(sqlite3 "$db_path" "PRAGMA busy_timeout = 30000; ANALYZE;" 2>&1); then
         local end_time; end_time=$(date +%s); local duration=$((end_time - start_time))
         _log_success "Database statistics updated (${duration}s)"; return 0
     else
@@ -342,11 +342,11 @@ _get_database_info() {
     local file_info; file_info=$(ls -lh "$db_path" 2>/dev/null)
     _log_info "  File: $file_info"
     if [[ "$DRY_RUN" == "false" ]]; then
-        local table_count; table_count=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM sqlite_master WHERE type='table';" 2>/dev/null || echo "unknown")
+        local table_count; table_count=$(sqlite3 "$db_path" "PRAGMA busy_timeout = 30000; SELECT COUNT(*) FROM sqlite_master WHERE type='table';" 2>/dev/null || echo "unknown")
         _log_info "  Tables: $table_count"
         local main_tables=("users" "ciphers" "folders" "collections")
         for table in "${main_tables[@]}"; do
-            local count; count=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM $table;" 2>/dev/null || echo "N/A")
+            local count; count=$(sqlite3 "$db_path" "PRAGMA busy_timeout = 30000; SELECT COUNT(*) FROM $table;" 2>/dev/null || echo "N/A")
             if [[ "$count" != "N/A" ]]; then _log_info "  $table records: $count"; fi
         done
     fi
@@ -382,3 +382,4 @@ main() {
 }
 
 main "$@"
+
