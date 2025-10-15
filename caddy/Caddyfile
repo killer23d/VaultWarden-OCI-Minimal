@@ -6,9 +6,18 @@
   import /etc/caddy-extra/cloudflare-ips.caddy
 }
 
-# The startup script and config library ensure DOMAIN is a clean hostname.
 {$DOMAIN} {
   encode gzip zstd
+
+  # Admin route with basic auth
+  handle /admin* {
+    basicauth {
+      admin {$ADMIN_BASIC_AUTH_HASH}
+    }
+    reverse_proxy vaultwarden:80
+  }
+
+  # Main app proxy
   reverse_proxy vaultwarden:8080 {
     # Trust the Cloudflare proxy headers
     header_up X-Real-IP {http.request.header.CF-Connecting-IP}
