@@ -70,8 +70,7 @@ _startup_workflow() {
 
 _validate_startup_prerequisites() {
     _log_info "Validating startup prerequisites..."
-
-    _validate_running_as_root
+    
     _validate_docker_daemon
     _validate_compose_file "$COMPOSE_FILE"
     _validate_network_connectivity
