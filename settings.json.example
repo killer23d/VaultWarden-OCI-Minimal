@@ -3,6 +3,7 @@
   "ADMIN_EMAIL": "admin@yourdomain.com",
 
   "ADMIN_TOKEN": "paste-generated-admin-token-here",
+  "ADMIN_BASIC_AUTH_HASH": "",
   "BACKUP_PASSPHRASE": "paste-generated-backup-passphrase-here",
 
   "DATABASE_URL": "sqlite:///data/db.sqlite3",
