@@ -12,7 +12,7 @@
 
   "SMTP_HOST": "smtp.gmail.com",
   "SMTP_PORT": 587,
-  "SMTP_SECURITY": "starttls", 
+  "SMTP_SECURITY": "starttls",
   "SMTP_USERNAME": "your-email@gmail.com",
   "SMTP_PASSWORD": "your-smtp-app-password",
   "SMTP_FROM": "noreply@yourdomain.com",
@@ -39,9 +39,8 @@
   "BACKUP_KEEP_DB": 30,
   "BACKUP_KEEP_FULL": 8,
 
-  "CONTAINER_NAME_VAULTWARDEN": "bw_vaultwarden",
-  "CONTAINER_NAME_CADDY": "bw_caddy",
-  "CONTAINER_NAME_FAIL2BAN": "bw_fail2ban",
-  "CONTAINER_NAME_WATCHTOWER": "bw_watchtower",
-  "CONTAINER_NAME_DDCLIENT": "bw_ddclient"
+  "VAULTWARDEN_MEMORY_LIMIT": "2G",
+  "VAULTWARDEN_MEMORY_RESERVATION": "512M",
+  "CADDY_MEMORY_LIMIT": "512M",
+  "FAIL2BAN_MEMORY_LIMIT": "256M"
 }

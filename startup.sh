@@ -8,8 +8,6 @@
 # - Service orchestration with health checks
 # - Integration with existing library ecosystem
 #
-# Dependencies: lib/logging.sh, lib/config.sh, lib/validation.sh, lib/system.sh
-#
 
 set -euo pipefail
 
@@ -19,9 +17,7 @@ ROOT_DIR="$SCRIPT_DIR"
 
 # Source existing libraries
 source "$ROOT_DIR/lib/logging.sh"
-# --- FIX: Source config lib to get centralized paths ---
 source "$ROOT_DIR/lib/config.sh"
-# --- END FIX ---
 source "$ROOT_DIR/lib/validation.sh"
 source "$ROOT_DIR/lib/system.sh"
 
@@ -32,7 +28,6 @@ _set_log_prefix "startup"
 readonly COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
 
 # Define required directories dynamically
-# PROJECT_STATE_DIR is now sourced from lib/config.sh
 REQUIRED_DIRS=(
     "$PROJECT_STATE_DIR"
     "$PROJECT_STATE_DIR/data"
@@ -76,13 +71,11 @@ _startup_workflow() {
 _validate_startup_prerequisites() {
     _log_info "Validating startup prerequisites..."
 
-    # Use existing validation functions
     _validate_running_as_root
     _validate_docker_daemon
     _validate_compose_file "$COMPOSE_FILE"
     _validate_network_connectivity
 
-    # Startup-specific validations
     if [[ ! -f "$ROOT_DIR/settings.json" ]] && [[ -z "${OCI_SECRET_OCID:-}" ]]; then
         _log_error "No configuration found."
         _log_info "This appears to be a fresh installation."
@@ -94,29 +87,21 @@ _validate_startup_prerequisites() {
 _prepare_runtime_environment() {
     _log_info "Preparing runtime environment..."
 
-    # Create required directories using existing system functions
     for dir in "${REQUIRED_DIRS[@]}"; do
         _create_directory_secure "$dir" "755"
     done
 
-    # --- FIX: Simplified placeholder creation ---
-    # The Caddy container mounts ./caddy to /etc/caddy-extra, so we only need to manage the source file.
     local caddy_placeholder="$ROOT_DIR/caddy/cloudflare-ips.caddy"
     if [[ ! -f "$caddy_placeholder" ]]; then
         local parent_dir
         parent_dir="$(dirname "$caddy_placeholder")"
         [[ -d "$parent_dir" ]] || mkdir -p "$parent_dir"
-
-        # Create a placeholder to prevent Caddy from failing on startup if the update script hasn't run yet.
         _create_file_secure "$caddy_placeholder" "644" "# Placeholder - will be populated by update scripts"
         _log_debug "Created Caddy placeholder: $caddy_placeholder"
     fi
-    # --- END FIX ---
 
-    # Create DDNS config directory and placeholder
-    # NOTE: /etc/ddclient is a standard path for this service on Linux.
-    local ddns_config_dir="/etc/ddclient"
-    _create_directory_secure "$ddns_config_dir" "755"
+    local ddns_config_dir="$ROOT_DIR/ddclient"
+     _create_directory_secure "$ddns_config_dir" "755"
 
     local ddns_config_file="$ddns_config_dir/ddclient.conf"
     if [[ ! -f "$ddns_config_file" ]]; then
@@ -124,20 +109,25 @@ _prepare_runtime_environment() {
         _log_debug "Created DDNS config placeholder: $ddns_config_file"
     fi
 
-    # Set proper permissions on sensitive files
     if [[ -f "$ROOT_DIR/settings.json" ]]; then
         chmod 600 "$ROOT_DIR/settings.json"
     fi
 
     # Export dynamic paths for docker-compose
     export PROJECT_STATE_DIR
-    export PROJECT_NAME
+    export COMPOSE_PROJECT_NAME="$PROJECT_NAME"
+
+    # Calculate and export dynamic subnet
+    _log_debug "Calculating dynamic Docker subnet..."
+    local subnet_octet
+    subnet_octet=$(echo "${COMPOSE_PROJECT_NAME:-vaultwarden}" | md5sum | tr -dc '0-9' | cut -c1-3 | sed 's/^0*//' | awk '{print (($1 % 240) + 16)}')
+    export DOCKER_SUBNET="172.${subnet_octet}.0.0/24"
+    _log_info "Using dynamic subnet: $DOCKER_SUBNET"
 }
 
 _execute_pre_startup_tasks() {
     _log_info "Executing pre-startup tasks..."
 
-    # Update Cloudflare IPs if script exists
     local cf_script="$ROOT_DIR/tools/update-cloudflare-ips.sh"
     if [[ -x "$cf_script" ]]; then
         _log_debug "Updating Cloudflare IP ranges..."
@@ -148,31 +138,22 @@ _execute_pre_startup_tasks() {
         fi
     fi
 
-    # Render DDNS configuration if needed and script exists
     if [[ "${DDCLIENT_ENABLED:-false}" == "true" ]]; then
         local ddns_script="$ROOT_DIR/tools/render-ddclient-conf.sh"
         if [[ -x "$ddns_script" ]]; then
             _log_debug "Rendering DDNS configuration..."
-            if ! timeout 15 "$ddns_script" 2>/dev/null; then
+            if ! timeout 15 "$ddns_script" "$ROOT_DIR/templates/ddclient.conf.tmpl" "$ROOT_DIR/ddclient/ddclient.conf" 2>/dev/null; then
                 _log_warning "Failed to render DDNS config, container will use environment variables"
             fi
         fi
     fi
 
-    # Clean up any orphaned containers
     _cleanup_orphaned_containers
 }
 
 _start_services() {
     _log_info "Starting $PROJECT_NAME services..."
-
-    # Change to root directory for compose
     cd "$ROOT_DIR"
-
-    # Set compose project name dynamically
-    export COMPOSE_PROJECT_NAME="$PROJECT_NAME"
-
-    # Start services with dependency handling
     if docker compose -f "$COMPOSE_FILE" up -d --remove-orphans; then
         _log_success "Services started successfully"
     else
@@ -186,9 +167,10 @@ _validate_service_health() {
     _log_info "Validating service health..."
     local max_retries=30
     local retry_delay=2
-    local vaultwarden_container="${CONTAINER_NAME_VAULTWARDEN:-bw_vaultwarden}"
+    local vaultwarden_service_name
+    vaultwarden_service_name=$(get_config_value "CONTAINER_NAME_VAULTWARDEN" || echo "vaultwarden")
 
-    _log_debug "Waiting for $vaultwarden_container to be healthy..."
+    _log_debug "Waiting for $vaultwarden_service_name to be healthy..."
     for ((i=1; i<=max_retries; i++)); do
         if docker compose ps --format json 2>/dev/null | jq -r ".[] | select(.Service==\"vaultwarden\") | .Health" 2>/dev/null | grep -q "healthy"; then
             _log_success "VaultWarden is healthy"
@@ -203,7 +185,6 @@ _validate_service_health() {
         sleep $retry_delay
     done
 
-    # Check other critical services
     local critical_services=("caddy" "fail2ban")
     for service in "${critical_services[@]}"; do
         if docker compose ps --format json 2>/dev/null | jq -r ".[] | select(.Service==\"$service\") | .State" 2>/dev/null | grep -q "running"; then
@@ -214,12 +195,16 @@ _validate_service_health() {
     done
 }
 
-
 _show_troubleshooting_info() {
+    _log_error "Stack failed to start correctly. Please check the logs."
     _log_info "Troubleshooting Information:"
     _log_info "  View container status: docker compose ps"
     _log_info "  View all logs: docker compose logs"
     _log_info "  View VaultWarden logs: docker compose logs vaultwarden"
+    _log_info "  Check system resources: free -h && df -h"
+    _log_info "  Validate configuration: ./startup.sh --validate"
+    _log_info "  Force a full restart: docker compose down && ./startup.sh"
+    _log_info "  Reset all data (DANGER): docker compose down -v && ./startup.sh"
 }
 
 _display_service_info() {
@@ -248,7 +233,6 @@ _cleanup_orphaned_containers() {
     docker network prune -f >/dev/null 2>&1 || true
 }
 
-# Handle script arguments
 case "${1:-}" in
     --help|-h)
         cat <<EOM
@@ -273,11 +257,11 @@ EOM
         _log_header "$PROJECT_NAME Configuration Validation"
         _validate_startup_prerequisites
         _load_configuration
+        _validate_configuration
         _log_success "Validation completed successfully"
         exit 0
         ;;
     "")
-        # No arguments, run normal startup
         _startup_workflow
         ;;
     *)

@@ -4,13 +4,11 @@
 #
 # This library provides centralized configuration management with support for:
 # - Local settings.json files
-# - OCI Vault integration for cloud deployments  
+# - OCI Vault integration for cloud deployments
 # - Systemd environment file management
 # - Automatic service name and path detection
 #
 # Dependencies: lib/logging.sh, lib/validation.sh
-# Author: VaultWarden OCI Minimal Project
-# License: MIT
 #
 
 set -euo pipefail
@@ -19,11 +17,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# --- FIX: Centralized project path and URL detection ---
 PROJECT_NAME="$(basename "$ROOT_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g')"
 SERVICE_NAME="${PROJECT_NAME}.service"
-# NOTE: The /var/lib path is a standard for Linux/Ubuntu.
-# For other OSes, this variable may need to be adjusted.
 PROJECT_STATE_DIR="/var/lib/${PROJECT_NAME}"
 CONFIG_BACKUP_DIR="${PROJECT_STATE_DIR}/config-backups"
 SYSTEMD_ENV_FILE="/etc/systemd/system/${PROJECT_NAME}.env"
@@ -33,16 +28,13 @@ _get_project_url() {
         local remote_url
         remote_url=$(git -C "$ROOT_DIR" config --get remote.origin.url 2>/dev/null || echo "")
         if [[ -n "$remote_url" ]]; then
-            # Remove .git suffix if present
             echo "${remote_url%.git}"
             return 0
         fi
     fi
-    # Fallback if not a git repo or remote is not set
     echo "https://github.com/your-username/your-forked-repo"
 }
 PROJECT_URL="$(_get_project_url)"
-# --- END FIX ---
 
 # Source required libraries
 source "$ROOT_DIR/lib/logging.sh"
@@ -200,17 +192,6 @@ _load_from_local_file() {
 _parse_json_config() {
     local json_content="$1"
     
-    local required_keys=(
-        "DOMAIN"
-        "ADMIN_TOKEN"
-        "SMTP_HOST"
-        "SMTP_FROM"
-        "SMTP_USERNAME"
-        "SMTP_PASSWORD"
-        "DATABASE_URL"
-        "BACKUP_PASSPHRASE"
-    )
-    
     CONFIG_VALUES=()
     
     local keys
@@ -230,30 +211,7 @@ _parse_json_config() {
             _log_debug "Loaded config key: $key"
         fi
     done <<< "$keys"
-    
-    for key in "${required_keys[@]}"; do
-        if [[ -z "${CONFIG_VALUES[$key]:-}" ]]; then
-            _log_error "Required configuration key missing: $key"
-            return 1
-        fi
-    done
-    
-    if [[ -n "${CONFIG_VALUES[APP_DOMAIN]:-}" ]] && [[ -z "${CONFIG_VALUES[DOMAIN]:-}" ]]; then
-        _log_warning "Converting legacy APP_DOMAIN to DOMAIN"
-        CONFIG_VALUES["DOMAIN"]="https://${CONFIG_VALUES[APP_DOMAIN]}"
-        _log_info "Set DOMAIN to: ${CONFIG_VALUES[DOMAIN]}"
-    fi
-    
-    if [[ -n "${CONFIG_VALUES[DOMAIN]:-}" ]]; then
-        local domain="${CONFIG_VALUES[DOMAIN]}"
-        domain="${domain%/}"
-        if [[ ! "$domain" =~ ^https?:// ]] && [[ "$domain" =~ [a-zA-Z0-9.-]+\.[a-zA-Z]{2,} ]]; then
-            domain="https://$domain"
-            _log_debug "Added https:// prefix to DOMAIN: $domain"
-        fi
-        CONFIG_VALUES["DOMAIN"]="$domain"
-    fi
-    
+
     _log_debug "Parsed ${#CONFIG_VALUES[@]} configuration keys"
     return 0
 }
@@ -337,11 +295,10 @@ EOF
 }
 
 # Get configuration value by key
-_get_config_value() {
+get_config_value() {
     local key="$1"
     
     if [[ "$CONFIG_LOADED" != "true" ]]; then
-        _log_error "Configuration not loaded"
         return 1
     fi
     
@@ -349,7 +306,6 @@ _get_config_value() {
         echo "${CONFIG_VALUES[$key]}"
         return 0
     else
-        _log_error "Configuration key not found: $key"
         return 1
     fi
 }
@@ -380,7 +336,7 @@ _display_config_summary() {
     _log_info "  Source: $CONFIG_SOURCE"
     _log_info "  Keys loaded: ${#CONFIG_VALUES[@]}"
     
-    local safe_keys=("DOMAIN" "SMTP_HOST" "SMTP_FROM" "DATABASE_URL" "DOMAIN_NAME")
+    local safe_keys=("DOMAIN" "SMTP_HOST" "SMTP_FROM" "DATABASE_URL")
     for key in "${safe_keys[@]}"; do
         if [[ -n "${CONFIG_VALUES[$key]:-}" ]]; then
             _log_info "  $key: ${CONFIG_VALUES[$key]}"
@@ -406,7 +362,7 @@ _get_project_paths() {
 }
 
 # Main configuration loading function
-_load_configuration() {
+load_config() {
     _log_debug "Initializing configuration system..."
     _init_config_system
     
@@ -434,7 +390,7 @@ _load_configuration() {
 }
 
 # Validate configuration completeness
-_validate_configuration() {
+validate_configuration() {
     if [[ "$CONFIG_LOADED" != "true" ]]; then
         _log_error "Configuration must be loaded before validation"
         return 1
@@ -442,26 +398,17 @@ _validate_configuration() {
     
     local errors=0
     
-    if [[ -n "${CONFIG_VALUES[DOMAIN]:-}" ]]; then
-        local domain="${CONFIG_VALUES[DOMAIN]}"
-        if [[ ! "$domain" =~ ^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]] && 
-           [[ ! "$domain" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
-            _log_error "Invalid domain format: $domain"
-            ((errors++))
-        fi
+    if [[ -z "${CONFIG_VALUES[DOMAIN]:-}" ]]; then
+        _log_error "Required configuration key missing: DOMAIN"
+        ((errors++))
+    elif [[ ! "${CONFIG_VALUES[DOMAIN]}" =~ ^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+        _log_error "Invalid DOMAIN format: ${CONFIG_VALUES[DOMAIN]}"
+        ((errors++))
     fi
-    
-    if [[ -n "${CONFIG_VALUES[SMTP_HOST]:-}" ]] && [[ -n "${CONFIG_VALUES[SMTP_FROM]:-}" ]]; then
-        if [[ ! "${CONFIG_VALUES[SMTP_FROM]}" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
-            _log_error "Invalid SMTP_FROM email format: ${CONFIG_VALUES[SMTP_FROM]}"
-            ((errors++))
-        fi
-    fi
-    
-    if [[ -n "${CONFIG_VALUES[DATABASE_URL]:-}" ]]; then
-        if [[ ! "${CONFIG_VALUES[DATABASE_URL]}" =~ ^sqlite:// ]]; then
-            _log_warning "Non-SQLite database detected: ${CONFIG_VALUES[DATABASE_URL]}"
-        fi
+
+    if [[ -z "${CONFIG_VALUES[ADMIN_TOKEN]:-}" ]]; then
+        _log_error "Required configuration key missing: ADMIN_TOKEN"
+        ((errors++))
     fi
     
     if [[ -n "${CONFIG_VALUES[ADMIN_EMAIL]:-}" ]]; then
@@ -470,6 +417,18 @@ _validate_configuration() {
             ((errors++))
         fi
     fi
+
+    # Validate memory limit formats
+    local mem_vars=("VAULTWARDEN_MEMORY_LIMIT" "VAULTWARDEN_MEMORY_RESERVATION" "CADDY_MEMORY_LIMIT" "FAIL2BAN_MEMORY_LIMIT")
+    for mem_var in "${mem_vars[@]}"; do
+        if [[ -n "${CONFIG_VALUES[$mem_var]:-}" ]]; then
+            local mem_limit="${CONFIG_VALUES[$mem_var]}"
+            if [[ ! "$mem_limit" =~ ^[0-9]+[gGmMkK]?$ ]]; then
+                _log_error "Invalid memory format for $mem_var: $mem_limit (e.g., 512M, 1G)"
+                ((errors++))
+            fi
+        fi
+    done
     
     if [[ $errors -eq 0 ]]; then
         _log_success "Configuration validation passed"
@@ -480,39 +439,11 @@ _validate_configuration() {
     fi
 }
 
-load_config() {
-    _load_configuration "$@"
-}
-
-get_config_value() {
-    _get_config_value "$@"
-}
-
-set_config_value() {
-    _set_config_value "$@"
-}
-
-display_config_summary() {
-    _display_config_summary "$@"
-}
-
-validate_configuration() {
-    _validate_configuration "$@"
-}
-
-backup_current_config() {
-    _backup_current_config "$@"
-}
-
-get_project_paths() {
-    _get_project_paths "$@"
-}
-
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
     _log_debug "lib/config.sh loaded successfully"
 else
     _log_warning "lib/config.sh should be sourced, not executed directly"
     echo "Testing configuration loading..."
-    _load_configuration
-    _display_config_summary
+    load_config
+    display_config_summary
 fi

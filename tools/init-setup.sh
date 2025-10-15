@@ -26,7 +26,6 @@ _set_log_prefix "init"
 readonly REQUIRED_PACKAGES=("docker.io" "docker-compose-plugin" "jq" "curl" "openssl")
 readonly OPTIONAL_PACKAGES=("fail2ban" "ufw" "gettext" "nftables")
 
-# --- FIX: New function to validate script permissions ---
 _validate_script_permissions() {
     _log_section "Validating Script Permissions"
     local errors=0
@@ -38,25 +37,31 @@ _validate_script_permissions() {
         "$ROOT_DIR/tools/restore.sh"
         "$ROOT_DIR/tools/sqlite-maintenance.sh"
         "$ROOT_DIR/tools/update-cloudflare-ips.sh"
+        "$ROOT_DIR/tools/render-ddclient-conf.sh"
+        "$ROOT_DIR/tools/oci-setup.sh"
+        "$ROOT_DIR/tools/update-secrets.sh"
     )
 
     for script in "${scripts_to_check[@]}"; do
         if [[ ! -x "$script" ]]; then
-            _log_error "Script not executable: $script"
-            _log_info "Run 'chmod +x $script' to fix."
-            ((errors++))
+            _log_warning "Script not executable: $script - fixing automatically"
+            if chmod +x "$script"; then
+                _log_success "Fixed permissions for: $script"
+            else
+                _log_error "Failed to fix permissions for: $script"
+                ((errors++))
+            fi
         else
             _log_debug "Script is executable: $script"
         fi
     done
 
     if [[ $errors -gt 0 ]]; then
-        _log_error "Please fix the script permissions and run again."
+        _log_error "Could not fix all script permissions. Please correct them manually and run again."
         exit 1
     fi
     _log_success "All scripts are executable."
 }
-# --- END FIX ---
 
 # Parse command line arguments first
 AUTO_MODE=false
@@ -97,7 +102,6 @@ done
 _init_setup_workflow() {
     _log_header "$PROJECT_NAME - Initial Setup"
 
-    # Display project information
     _log_info "Project Details:"
     _print_key_value "Name" "$PROJECT_NAME"
     _print_key_value "Root" "$ROOT_DIR"
@@ -105,32 +109,15 @@ _init_setup_workflow() {
     _print_key_value "Mode" "$([ "$AUTO_MODE" == "true" ] && echo "Automated" || echo "Interactive")"
     echo
 
-    # Step 1: System validation and preparation
     _validate_script_permissions
     _validate_system_requirements
-
-    # Step 2: Package installation
     _install_required_packages
-
-    # Step 3: Docker setup and validation
     _setup_docker_environment
-
-    # Step 4: System security configuration
     _configure_system_security
-
-    # Step 5: Generate initial configuration
     _generate_initial_configuration
-
-    # Step 6: Create system directories and files
     _create_system_structure
-
-    # Step 6a: Configure fail2ban Cloudflare integration
     _configure_cloudflare_fail2ban
-
-    # Step 6b: Setup automated maintenance via cron
     _setup_cron_jobs
-
-    # Step 7: Final validation
     _validate_setup_completion
 
     _log_success "Initial setup completed successfully!"
@@ -142,13 +129,12 @@ _init_setup_workflow() {
 _validate_system_requirements() {
     _log_section "System Requirements Validation"
 
-    # Use existing validation functions
     _validate_running_as_root
     _validate_os_compatibility
+    _validate_systemd_availability
     _validate_system_resources
     _validate_network_connectivity
 
-    # Setup-specific validations
     if [[ -f "$CONFIG_FILE" ]]; then
         _log_warning "Configuration file already exists: $CONFIG_FILE"
         if [[ "$AUTO_MODE" != "true" ]]; then
@@ -165,15 +151,12 @@ _validate_system_requirements() {
 _install_required_packages() {
     _log_section "Package Installation"
 
-    # Update package index using existing system functions
     _update_package_index
 
-    # Install required packages
     for package in "${REQUIRED_PACKAGES[@]}"; do
         _install_package "$package"
     done
 
-    # Install optional packages with user consent
     if [[ "$AUTO_MODE" != "true" ]]; then
         _log_confirm "Install optional security packages (fail2ban, ufw, nftables)?" "Y"
         read -r response
@@ -185,7 +168,6 @@ _install_required_packages() {
             done
         fi
     else
-        # Auto mode installs optional packages
         for package in "${OPTIONAL_PACKAGES[@]}"; do
             _install_package "$package"
         done
@@ -195,15 +177,12 @@ _install_required_packages() {
 _setup_docker_environment() {
     _log_section "Docker Environment Setup"
 
-    # Enable and start Docker using existing functions
     _enable_service "docker"
     _start_service "docker"
 
-    # Validate Docker daemon
     _validate_docker_daemon
     _validate_docker_compose
 
-    # Add current user to docker group if not root-only
     local current_sudo_user="${SUDO_USER:-}"
     if [[ -n "$current_sudo_user" ]] && [[ "$current_sudo_user" != "root" ]]; then
         _log_info "Adding user $current_sudo_user to docker group..."
@@ -215,19 +194,14 @@ _setup_docker_environment() {
 _configure_system_security() {
     _log_section "System Security Configuration"
 
-    # Configure UFW firewall if installed
     if command -v ufw >/dev/null 2>&1; then
         _log_info "Configuring UFW firewall..."
 
-        # Basic UFW configuration
         ufw --force enable >/dev/null 2>&1
         ufw default deny incoming >/dev/null 2>&1
         ufw default allow outgoing >/dev/null 2>&1
 
-        # Allow SSH (current session)
         ufw allow ssh >/dev/null 2>&1
-
-        # Allow HTTP/HTTPS
         ufw allow 80/tcp >/dev/null 2>&1
         ufw allow 443/tcp >/dev/null 2>&1
 
@@ -239,7 +213,6 @@ _configure_system_security() {
         fi
     fi
 
-    # Enable fail2ban service if installed (configuration is already in ./fail2ban/)
     if command -v fail2ban-client >/dev/null 2>&1; then
         _log_info "Enabling fail2ban service..."
         _enable_service "fail2ban"
@@ -254,7 +227,6 @@ _setup_cron_jobs() {
     local project_root="$ROOT_DIR"
     local cron_file="/tmp/vaultwarden-cron"
 
-    # Create cron job entries
     cat > "$cron_file" <<EOF
 # ${PROJECT_NAME} - Automated Maintenance Schedule
 # Generated by init-setup.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -275,11 +247,10 @@ _setup_cron_jobs() {
 
 # Log rotation and cleanup (daily at 4 AM)
 0 4 * * * root find ${PROJECT_STATE_DIR}/logs -name "*.log" -size +50M -exec truncate -s 10M {} \; 2>&1 | logger -t log-cleanup
-0 4 * * * root find ${PROJECT_STATE_DIR}/backups -name "*.backup*" -mtime +30 -delete 2>&1 | logger -t backup-cleanup
+0 4 * * * root find ${PROJECT_STATE_DIR}/backups -type d -name "20*" -mtime +30 -exec rm -rf {} \; 2>&1 | logger -t backup-cleanup
 
 EOF
 
-    # Install cron jobs
     if [[ "$AUTO_MODE" != "true" ]]; then
         _log_confirm "Install automated maintenance cron jobs?" "Y"
         read -r response
@@ -292,26 +263,18 @@ EOF
         fi
     fi
 
-    # Install the cron jobs
     if crontab -l > /dev/null 2>&1; then
-        # Backup existing crontab
         local backup_cron="/tmp/crontab-backup-$(date +%Y%m%d_%H%M%S)"
         crontab -l > "$backup_cron"
         _log_info "Existing crontab backed up to: $backup_cron"
-
-        # Merge with existing crontab
         (crontab -l; echo; cat "$cron_file") | crontab -
     else
-        # No existing crontab, install fresh
         crontab "$cron_file"
     fi
 
-    # Cleanup temporary file
     rm -f "$cron_file"
-
     _log_success "Cron jobs installed successfully"
 
-    # Display installed jobs
     if [[ "$AUTO_MODE" != "true" ]]; then
         _log_info "Installed cron schedule:"
         echo "  Database maintenance: Weekly full (Mon 2AM), Daily quick (6AM)"
@@ -321,7 +284,6 @@ EOF
         echo "  Cleanup: Daily log rotation and old backup removal (4AM)"
     fi
 
-    # Enable cron service
     _enable_service "cron" || _enable_service "crond" || {
         _log_warning "Could not enable cron service automatically"
         _log_info "Ensure cron service is running: systemctl enable --now cron"
@@ -338,7 +300,7 @@ _configure_cloudflare_fail2ban() {
     local jail_local_output="$ROOT_DIR/fail2ban/jail.d/jail.local"
     local cloudflare_email="${CLOUDFLARE_EMAIL:-}"
     local cloudflare_api_key="${CLOUDFLARE_API_KEY:-}"
-    local fail2ban_action="nftables-multiport" # Default action
+    local fail2ban_action="nftables-multiport"
 
     if [[ ! -f "$cloudflare_conf" ]] || [[ ! -f "$jail_local_template" ]]; then
         _log_warning "Fail2ban configuration files not found, skipping integration."
@@ -381,8 +343,8 @@ _configure_cloudflare_fail2ban() {
         _log_info "Setting 'nftables-multiport' as the active ban action."
     fi
 
-    # Render the jail.local file with the selected action
     _log_info "Rendering fail2ban jail configuration..."
+    mkdir -p "$(dirname "$jail_local_output")"
     sed "s/{{FAIL2BAN_ACTION}}/$fail2ban_action/g" "$jail_local_template" > "$jail_local_output"
     _log_success "Fail2ban jail configured to use '$fail2ban_action' action."
 }
@@ -393,7 +355,6 @@ _generate_initial_configuration() {
     local domain smtp_host smtp_from smtp_username smtp_password admin_email
 
     if [[ "$AUTO_MODE" == "true" ]]; then
-        # Auto mode uses placeholder values
         domain="https://localhost"
         admin_email="admin@localhost"
         smtp_host="smtp.gmail.com"
@@ -401,7 +362,6 @@ _generate_initial_configuration() {
         smtp_username=""
         smtp_password=""
     else
-        # Interactive mode prompts for values
         _log_prompt "Enter your domain name (e.g., https://vault.example.com)"
         read -r domain
 
@@ -423,12 +383,10 @@ _generate_initial_configuration() {
         echo
     fi
 
-    # Generate secure random tokens using OpenSSL
     local admin_token backup_passphrase
     admin_token=$(openssl rand -base64 32)
     backup_passphrase=$(openssl rand -base64 32)
 
-    # Create configuration JSON with dynamic paths
     _create_configuration_file "$domain" "$admin_email" "$smtp_host" "$smtp_from" "$smtp_username" "$smtp_password" "$admin_token" "$backup_passphrase"
 
     _log_success "Initial configuration generated"
@@ -442,16 +400,13 @@ _generate_initial_configuration() {
 _create_configuration_file() {
     local domain="$1" admin_email="$2" smtp_host="$3" smtp_from="$4" smtp_username="$5" smtp_password="$6" admin_token="$7" backup_passphrase="$8"
 
-    # Extract app domain from full domain URL
     local app_domain="${domain#https://}"
+    app_domain="${app_domain#http://}"
     local domain_name
     domain_name=$(echo "$app_domain" | sed 's/^[^.]*\.//')
 
-    # Build configuration JSON
     cat > "$CONFIG_FILE" <<EOF
 {
-  "DOMAIN_NAME": "${domain_name}",
-  "APP_DOMAIN": "${app_domain}",
   "DOMAIN": "${domain}",
   "ADMIN_EMAIL": "${admin_email}",
   "ADMIN_TOKEN": "${admin_token}",
@@ -478,21 +433,21 @@ _create_configuration_file() {
   "DDCLIENT_HOST": "${app_domain}",
   "CLOUDFLARE_EMAIL": "",
   "CLOUDFLARE_API_KEY": "",
+  "WATCHTOWER_NOTIFICATIONS": "email",
+  "TZ": "UTC",
+  "LOG_LEVEL": "warn",
   "BACKUP_KEEP_DB": 30,
   "BACKUP_KEEP_FULL": 8,
-  "CONTAINER_NAME_VAULTWARDEN": "bw_vaultwarden",
-  "CONTAINER_NAME_CADDY": "bw_caddy",
-  "CONTAINER_NAME_FAIL2BAN": "bw_fail2ban",
-  "CONTAINER_NAME_WATCHTOWER": "bw_watchtower",
-  "CONTAINER_NAME_DDCLIENT": "bw_ddclient"
+  "VAULTWARDEN_MEMORY_LIMIT": "2G",
+  "VAULTWARDEN_MEMORY_RESERVATION": "512M",
+  "CADDY_MEMORY_LIMIT": "512M",
+  "FAIL2BAN_MEMORY_LIMIT": "256M"
 }
 EOF
 
-    # Secure the configuration file
     chmod 600 "$CONFIG_FILE"
     chown root:root "$CONFIG_FILE"
 
-    # Validate the generated JSON
     if ! jq . "$CONFIG_FILE" >/dev/null 2>&1; then
         _log_error "Generated configuration file contains invalid JSON"
         return 1
@@ -504,7 +459,6 @@ EOF
 _create_system_structure() {
     _log_section "System Structure Creation"
 
-    # Create required directories using existing system functions
     local directories=(
         "$PROJECT_STATE_DIR"
         "$PROJECT_STATE_DIR/data/bwdata"
@@ -513,20 +467,20 @@ _create_system_structure() {
         "$PROJECT_STATE_DIR/logs/fail2ban"
         "$PROJECT_STATE_DIR/logs/watchtower"
         "$PROJECT_STATE_DIR/logs/ddclient"
-        "$PROJECT_STATE_DIR/backups"
+        "$PROJECT_STATE_DIR/backups/db"
+        "$PROJECT_STATE_DIR/backups/full"
         "$PROJECT_STATE_DIR/state"
         "$PROJECT_STATE_DIR/caddy_data"
         "$PROJECT_STATE_DIR/caddy_config"
-        "/etc/caddy-extra"
         "$ROOT_DIR/caddy"
         "$ROOT_DIR/ddclient"
+        "$ROOT_DIR/fail2ban/jail.d"
     )
 
     for dir in "${directories[@]}"; do
         _create_directory_secure "$dir" "755"
     done
 
-    # Create placeholder files
     local placeholders=(
         "$ROOT_DIR/caddy/cloudflare-ips.caddy"
         "$ROOT_DIR/ddclient/ddclient.conf"
@@ -534,41 +488,36 @@ _create_system_structure() {
 
     for placeholder in "${placeholders[@]}"; do
         if [[ "$placeholder" == *"ddclient.conf" ]]; then
-            _create_file_secure "$placeholder" "600" "# DDNS Configuration - Placeholder\n# This file will be updated by tools/render-ddclient-conf.sh\nprotocol=cloudflare\nuse=web\nssl=yes"
+            _create_file_secure "$placeholder" "600" "# DDNS Configuration - Placeholder"
         else
             _create_file_secure "$placeholder" "644" "# Placeholder - will be populated by update scripts"
         fi
     done
 
-    # Create state tracking file
     cat > "$PROJECT_STATE_DIR/state/project-info" <<EOF
 PROJECT_NAME=$PROJECT_NAME
 PROJECT_STATE_DIR=$PROJECT_STATE_DIR
 INITIALIZED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 ROOT_DIR=$ROOT_DIR
-SCRIPT_VERSION=1.0.0
+SCRIPT_VERSION=1.1.0
 EOF
 
     chmod 600 "$PROJECT_STATE_DIR/state/project-info"
-
     _log_success "System structure created successfully"
 }
 
 _validate_setup_completion() {
     _log_section "Setup Validation"
 
-    # Validate configuration file
     if [[ ! -f "$CONFIG_FILE" ]] || ! jq . "$CONFIG_FILE" >/dev/null 2>&1; then
         _log_error "Configuration file validation failed"
         return 1
     fi
 
-    # Validate Docker using existing functions
     _validate_docker_daemon
     _validate_docker_compose
 
-    # Validate required directories
-    local critical_dirs=("$PROJECT_STATE_DIR" "/etc/caddy-extra" "$ROOT_DIR/caddy" "$ROOT_DIR/ddclient")
+    local critical_dirs=("$PROJECT_STATE_DIR" "$ROOT_DIR/caddy" "$ROOT_DIR/ddclient")
     for dir in "${critical_dirs[@]}"; do
         if [[ ! -d "$dir" ]]; then
             _log_error "Required directory not created: $dir"
@@ -608,5 +557,4 @@ _display_next_steps() {
     _print_key_value "Service Name" "${PROJECT_NAME}.service"
 }
 
-# Execute main workflow
 _init_setup_workflow
