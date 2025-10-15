@@ -1,939 +1,1015 @@
 # Troubleshooting Guide
 
-## Overview
+> **🎯 Goal**: Comprehensive troubleshooting guide covering common issues, diagnostic tools, and resolution procedures for VaultWarden-OCI-Minimal.
 
-This comprehensive troubleshooting guide covers common issues, diagnostic procedures, and resolution steps for VaultWarden-OCI-Minimal. The guide is organized by symptom and includes both automatic recovery options and manual intervention procedures.
+## 🚨 **Critical Troubleshooting Principles**
 
-## General Troubleshooting Approach
-
-### Debug Mode Activation
-
-#### Enable Comprehensive Debug Output
+### **Always Start Here**
 ```bash
-# Enable debug mode for any script
+# 1. NEVER use 'docker compose up' directly
+# 2. ALWAYS use startup.sh for service management
+# 3. Check setup completion before troubleshooting services
+# 4. Enable debug mode for detailed diagnostics
+```
+
+### **Common Misconceptions**
+- **"Hardcoded paths are broken"** → Paths are dynamic, generated from project directory name
+- **"Missing directories cause failures"** → init-setup.sh creates all required directories
+- **"Docker network errors"** → Network syntax uses dynamic subnet calculation (valid)
+- **"Script permissions issues"** → Git doesn't preserve execute permissions; run `chmod +x` after clone
+
+## 🔍 **Diagnostic Tools and Debug Mode**
+
+### **Enable Debug Mode**
+```bash
+# Enable debug logging for any script
 export DEBUG=1
 
-# Examples with debug output
+# Run with debug enabled
 DEBUG=1 ./startup.sh
 DEBUG=1 ./tools/monitor.sh
 DEBUG=1 ./tools/init-setup.sh
 ```
 
-#### Debug Mode Features
-- **Verbose Logging**: Detailed step-by-step execution information
-- **Variable Inspection**: Display of configuration values and paths
-- **Command Tracing**: Show actual commands being executed
-- **Error Context**: Enhanced error messages with context
-- **Timing Information**: Performance and timing details
-
-### Diagnostic Information Collection
-
-#### System Information Gathering
+### **System Health Check**
 ```bash
-# Collect comprehensive system diagnostics
-./tools/monitor.sh --diagnostic > system_diagnostic.txt
-
-# Manual diagnostic collection
-cat << 'EOF' > collect_diagnostics.sh
-#!/bin/bash
-echo "=== System Information ==="
-uname -a
-cat /etc/os-release
-free -h
-df -h
-
-echo "=== Docker Information ==="
-docker --version
-docker compose version
-docker system info
-
-echo "=== Container Status ==="
-docker compose ps
-docker compose logs --tail 50
-
-echo "=== Network Status ==="
-ss -tlnp | grep -E ':80|:443'
-curl -I https://google.com
-
-echo "=== Configuration Status ==="
-ls -la settings.json
+# Comprehensive system validation
 ./startup.sh --validate
 
-echo "=== Log Summary ==="
-tail -20 /var/lib/*/logs/vaultwarden/*.log
-EOF
+# Monitoring system check  
+./tools/monitor.sh --verbose
 
-chmod +x collect_diagnostics.sh
-./collect_diagnostics.sh
+# Configuration validation
+source lib/config.sh && _load_configuration && _display_config_summary
 ```
 
-## Installation and Setup Issues
-
-### Installation Failures
-
-#### Issue: Docker Installation Fails
-**Symptoms:**
-- "Docker not found" after running init-setup.sh
-- Package installation errors
-- Permission denied errors
-
-**Diagnosis:**
+### **Log Analysis**
 ```bash
-# Check if Docker is installed
+# View all service logs
+docker compose logs --tail=100
+
+# Service-specific logs
+docker compose logs vaultwarden
+docker compose logs caddy  
+docker compose logs fail2ban
+
+# System logs
+journalctl -t monitor
+journalctl -t backup
+journalctl -t sqlite-maintenance
+
+# Real-time log monitoring
+docker compose logs -f
+```
+
+## 🚀 **Setup and Initial Deployment Issues**
+
+### **Issue: "Permission Denied" on Scripts**
+
+**Symptoms**:
+```bash
+bash: ./startup.sh: Permission denied
+-bash: ./tools/init-setup.sh: Permission denied
+```
+
+**Root Cause**: Git doesn't preserve executable permissions
+
+**Solution**:
+```bash
+# Make all scripts executable
+chmod +x startup.sh tools/*.sh lib/*.sh
+
+# Verify permissions
+ls -la startup.sh tools/ | grep rwx
+
+# Alternative: Bulk permission fix
+find . -name "*.sh" -exec chmod +x {} \;
+```
+
+**Prevention**: Add to post-clone checklist in documentation
+
+---
+
+### **Issue: "Docker not found" or "Docker daemon not running"**
+
+**Symptoms**:
+```bash
+docker: command not found
+Cannot connect to the Docker daemon at unix:///var/run/docker.sock
+```
+
+**Root Cause**: Docker not installed or service not started
+
+**Diagnostic Commands**:
+```bash
+# Check Docker installation
 which docker
 docker --version
 
 # Check Docker service status
 systemctl status docker
+systemctl is-active docker
 
-# Check for installation errors
-journalctl -u docker --since "1 hour ago"
+# Check Docker daemon socket
+ls -la /var/run/docker.sock
 ```
 
-**Resolution:**
+**Solution**:
 ```bash
-# Manual Docker installation
-curl -fsSL https://get.docker.com -o get-docker.sh
-sh get-docker.sh
+# Run init-setup.sh to install Docker
+sudo ./tools/init-setup.sh
 
-# Add user to Docker group
-usermod -aG docker $USER
-newgrp docker
+# Manual Docker installation (Ubuntu)
+sudo apt update
+sudo apt install docker.io docker-compose-plugin
+sudo systemctl enable docker
+sudo systemctl start docker
 
-# Start and enable Docker service
-systemctl enable --now docker
+# Add user to docker group (optional)
+sudo usermod -aG docker $USER
+# Log out and back in for group changes to take effect
+```
+
+---
+
+### **Issue: "jq: command not found" or Missing Dependencies**
+
+**Symptoms**:
+```bash
+jq: command not found
+curl: command not found
+openssl: command not found
+```
+
+**Root Cause**: Required packages not installed
+
+**Solution**:
+```bash
+# Run complete setup (recommended)
+sudo ./tools/init-setup.sh
+
+# Manual package installation (Ubuntu)
+sudo apt update
+sudo apt install jq curl openssl fail2ban ufw
 
 # Verify installation
-docker run hello-world
+jq --version && curl --version && openssl version
 ```
 
-#### Issue: Package Dependencies Missing
-**Symptoms:**
-- "jq command not found"
-- "curl not available" 
-- Script execution failures
+---
 
-**Diagnosis:**
+### **Issue: "Configuration file not found"**
+
+**Symptoms**:
 ```bash
-# Check for missing packages
-which jq curl openssl fail2ban
-
-# Check package installation status
-dpkg -l | grep -E "jq|curl|openssl|fail2ban"
+Configuration file not found: /path/to/settings.json
+Run ./tools/init-setup.sh first
 ```
 
-**Resolution:**
+**Root Cause**: Attempting to run startup.sh before init-setup.sh
+
+**Solution**:
 ```bash
-# Update package index
-apt update
-
-# Install missing packages
-apt install -y jq curl openssl fail2ban ufw gettext
-
-# Retry setup
-./tools/init-setup.sh
-```
-
-#### Issue: Permission Errors During Setup
-**Symptoms:**
-- "Permission denied" when creating files
-- Cannot write to /var/lib/ or /etc/
-- File ownership errors
-
-**Diagnosis:**
-```bash
-# Check current user and permissions
-whoami
-id
-
-# Check target directory permissions
-ls -ld /var/lib /etc/systemd/system
-```
-
-**Resolution:**
-```bash
-# Ensure running as root
-sudo su -
-
-# Fix ownership of project directory
-chown -R root:root /opt/VaultWarden-OCI-Minimal
-
-# Retry setup as root
+# Run setup first (creates settings.json)
 sudo ./tools/init-setup.sh
-```
 
-### Configuration Issues
-
-#### Issue: settings.json Not Created or Invalid
-**Symptoms:**
-- "Configuration file not found"
-- JSON parsing errors
-- Invalid configuration warnings
-
-**Diagnosis:**
-```bash
-# Check if settings.json exists
+# Verify configuration file exists
 ls -la settings.json
 
-# Validate JSON syntax
+# Check configuration validity
 jq . settings.json
 
-# Check file permissions
-ls -la settings.json
+# If file exists but empty, regenerate
+sudo ./tools/init-setup.sh --reconfigure
 ```
 
-**Resolution:**
+---
+
+### **Issue: Setup Script Fails with Permission Errors**
+
+**Symptoms**:
 ```bash
-# Re-create configuration from example
-cp settings.json.example settings.json
-
-# Fix JSON syntax errors
-nano settings.json
-
-# Set proper permissions
-chmod 600 settings.json
-chown root:root settings.json
-
-# Validate configuration
-./startup.sh --validate
+mkdir: cannot create directory '/var/lib/project': Permission denied
+cp: cannot create regular file '/etc/systemd/system/': Permission denied
 ```
 
-#### Issue: Environment Variable Problems
-**Symptoms:**
-- Variables not exported correctly
-- Docker Compose cannot find variables
-- Configuration not loaded
+**Root Cause**: Not running setup script as root
 
-**Diagnosis:**
+**Solution**:
 ```bash
-# Check environment variables
-printenv | grep -E "DOMAIN|ADMIN_TOKEN|PROJECT"
+# Run setup with proper privileges
+sudo ./tools/init-setup.sh
 
-# Test configuration loading
-source lib/config.sh
-_load_configuration
+# Verify running as root
+whoami  # Should return 'root'
+
+# If using sudo, ensure it's working
+sudo whoami  # Should return 'root'
 ```
 
-**Resolution:**
+## 🌐 **Network and Connectivity Issues**
+
+### **Issue: "Cannot Access Web Interface"**
+
+**Symptoms**:
+- Browser shows "This site can't be reached"
+- Connection timeout or refused
+- `curl -I https://domain.com` fails
+
+**Comprehensive Diagnostic Process**:
+
+#### **Step 1: Container Status Check**
 ```bash
-# Manually source configuration
-source lib/config.sh
+# Check if containers are running
+docker compose ps
 
-# Force configuration reload
-unset CONFIG_LOADED
-_load_configuration
-
-# Restart with clean environment
+# Expected output: All containers "Up", VaultWarden "healthy"
+# If containers are down:
 ./startup.sh
-```
 
-## Service Startup Issues
-
-### Container Startup Failures
-
-#### Issue: VaultWarden Container Won't Start
-**Symptoms:**
-- Container exits immediately
-- "Health check failing" messages
-- Database connection errors
-
-**Diagnosis:**
-```bash
-# Check container status
-docker compose ps vaultwarden
-
-# View container logs
+# If containers keep failing:
 docker compose logs vaultwarden
-
-# Check container configuration
-docker compose config | grep -A 20 vaultwarden
-
-# Test container manually
-docker run --rm -it vaultwarden/server:latest /bin/bash
 ```
 
-**Resolution:**
+#### **Step 2: Port Binding Verification**
 ```bash
-# Check database file permissions
-ls -la /var/lib/*/data/bwdata/
-chown -R 1000:1000 /var/lib/*/data/bwdata/
+# Check if ports are bound correctly
+sudo ss -tlnp | grep -E ":(80|443)"
 
-# Reset database if corrupted
-./tools/sqlite-maintenance.sh --repair
+# Expected output:
+# *:80 ... users:(("caddy",pid=...))
+# *:443 ... users:(("caddy",pid=...))
 
-# Restart container
-docker compose restart vaultwarden
-
-# Full service restart
-./startup.sh
+# If ports not bound:
+docker compose logs caddy
 ```
 
-#### Issue: Caddy SSL Certificate Problems
-**Symptoms:**
-- SSL certificate errors in browser
-- "Certificate not found" in logs
-- ACME challenge failures
-
-**Diagnosis:**
+#### **Step 3: Firewall Configuration**
 ```bash
-# Check Caddy logs for certificate errors
-docker compose logs caddy | grep -i certificate
+# Check UFW status
+sudo ufw status verbose
 
-# Check domain DNS resolution
-nslookup vault.example.com
+# Expected rules:
+# 22/tcp ALLOW IN (SSH)
+# 80/tcp ALLOW IN (HTTP)  
+# 443/tcp ALLOW IN (HTTPS)
 
-# Verify domain accessibility from internet
-curl -I http://vault.example.com
-
-# Check Caddy configuration
-docker compose exec caddy caddy list-certificates
+# If rules missing:
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw reload
 ```
 
-**Resolution:**
+#### **Step 4: DNS Resolution**
 ```bash
-# Verify domain points to server
-dig vault.example.com
+# Test DNS resolution locally
+nslookup your-domain.com
+dig your-domain.com A
 
-# Check ports 80/443 are accessible
-nc -zv vault.example.com 80
-nc -zv vault.example.com 443
+# Test from external source
+# Use: https://www.whatsmydns.net/
 
-# Force certificate renewal
-docker compose exec caddy caddy reload
-
-# Reset Caddy data if needed
-docker compose down
-docker volume rm caddy_data
-./startup.sh
+# Check domain configuration
+grep DOMAIN settings.json
+# Should match your actual domain exactly
 ```
 
-#### Issue: Fail2ban Service Problems
-**Symptoms:**
-- Fail2ban not starting
-- "Cannot bind to socket" errors
-- Jail configuration failures
-
-**Diagnosis:**
+#### **Step 5: Network Connectivity Test**
 ```bash
-# Check fail2ban status
-docker compose logs fail2ban
-
-# Check host fail2ban conflicts
-systemctl status fail2ban
-
-# Verify network mode
-docker compose config | grep -A 5 fail2ban
-```
-
-**Resolution:**
-```bash
-# Stop host fail2ban service if running
-systemctl stop fail2ban
-systemctl disable fail2ban
-
-# Restart fail2ban container
-docker compose restart fail2ban
-
-# Check jail status
-docker compose exec fail2ban fail2ban-client status
-```
-
-### Network and Connectivity Issues
-
-#### Issue: Cannot Access Web Interface
-**Symptoms:**
-- "Connection refused" in browser
-- Timeout errors when connecting
-- "Site can't be reached" messages
-
-**Diagnosis:**
-```bash
-# Test local connectivity
+# Test from server to itself
 curl -I http://localhost:80
 curl -I https://localhost:443
 
-# Check if ports are listening
-ss -tlnp | grep -E ':80|:443'
-
 # Test external connectivity
-curl -I http://YOUR_SERVER_IP
+curl -I http://your-domain.com
+curl -I https://your-domain.com
 
-# Check firewall rules
-ufw status verbose
-iptables -L -n
+# Test from different network
+# Use mobile hotspot or different location
 ```
 
-**Resolution:**
+**Common Solutions**:
 ```bash
-# Check container port mappings
-docker compose ps
-docker port $(docker compose ps -q caddy)
-
-# Verify firewall allows traffic
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw reload
-
-# Test with disabled firewall (temporarily)
-ufw --force disable
-curl -I http://YOUR_SERVER_IP
-ufw --force enable
-
 # Restart networking
-systemctl restart networking
-./startup.sh
-```
-
-#### Issue: DNS Resolution Problems
-**Symptoms:**
-- Domain doesn't resolve
-- "Name not found" errors
-- SSL certificate validation fails
-
-**Diagnosis:**
-```bash
-# Test DNS resolution
-nslookup vault.example.com
-dig vault.example.com
-
-# Check with different DNS servers
-nslookup vault.example.com 8.8.8.8
-nslookup vault.example.com 1.1.1.1
-
-# Verify DNS propagation
-dig vault.example.com @8.8.8.8
-dig vault.example.com @1.1.1.1
-```
-
-**Resolution:**
-```bash
-# Update DNS settings
-echo "nameserver 8.8.8.8" > /etc/resolv.conf
-echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+sudo systemctl restart networking
 
 # Flush DNS cache
-systemctl restart systemd-resolved
+sudo systemctl restart systemd-resolved
 
-# Wait for DNS propagation (up to 24-48 hours)
-# Verify from external location
+# Check for conflicting services
+sudo ss -tlnp | grep -E ":(80|443)"
+# Kill any conflicting processes
 
-# Use IP address temporarily
-curl -H "Host: vault.example.com" http://YOUR_SERVER_IP
+# Verify domain points to correct IP
+curl -s http://whatismyip.akamai.com/
+# Compare with DNS A record
 ```
 
-## Runtime and Performance Issues
+---
 
-### Database Issues
+### **Issue: SSL Certificate Problems**
 
-#### Issue: SQLite Database Corruption
-**Symptoms:**
-- "Database disk image is malformed"
-- Data inconsistency errors
-- Application crashes on database access
+**Symptoms**:
+- Browser SSL warnings
+- "Your connection is not private"
+- Certificate appears self-signed or invalid
 
-**Diagnosis:**
+**Diagnostic Commands**:
 ```bash
-# Check database integrity
-./tools/sqlite-maintenance.sh --check
+# Check certificate status
+docker compose exec caddy caddy list-certificates
 
-# Detailed integrity check
-./tools/sqlite-maintenance.sh --verify
+# Check certificate details
+echo | openssl s_client -connect your-domain.com:443 -servername your-domain.com 2>/dev/null | openssl x509 -noout -text
 
-# Check database file
-ls -la /var/lib/*/data/bwdata/db.sqlite3
-file /var/lib/*/data/bwdata/db.sqlite3
+# Check Caddy logs for certificate issues
+docker compose logs caddy | grep -i certificate
+docker compose logs caddy | grep -i acme
+docker compose logs caddy | grep -i error
 ```
 
-**Resolution:**
+**Root Causes and Solutions**:
+
+#### **Cause 1: Domain Not Publicly Accessible**
 ```bash
-# Stop VaultWarden
-docker compose stop vaultwarden
+# Let's Encrypt requires public domain accessibility
+# Test ACME challenge path
+curl -I http://your-domain.com/.well-known/acme-challenge/test
 
-# Backup current database
-cp /var/lib/*/data/bwdata/db.sqlite3 /var/lib/*/data/bwdata/db.sqlite3.corrupted
-
-# Attempt repair
-./tools/sqlite-maintenance.sh --repair
-
-# If repair fails, restore from backup
-./tools/restore.sh --database-only --latest
-
-# Restart services
-./startup.sh
+# If 404 or unreachable:
+# 1. Check CloudFlare proxy settings (disable temporarily)
+# 2. Verify DNS propagation
+# 3. Check firewall rules
 ```
 
-#### Issue: Database Performance Problems
-**Symptoms:**
-- Slow web interface response
-- Timeout errors
-- High CPU usage
-
-**Diagnosis:**
+#### **Cause 2: Certificate Generation in Progress**
 ```bash
-# Check database statistics
-./tools/sqlite-maintenance.sh --stats
+# Certificate generation takes 5-10 minutes
+# Monitor progress
+docker compose logs -f caddy | grep -i certificate
 
-# Monitor database performance
-./tools/sqlite-maintenance.sh --explain-queries
-
-# Check system resources
-top -p $(pgrep -f vaultwarden)
-iostat -x 1 5
+# Wait for completion message
+# "successfully obtained certificate"
 ```
 
-**Resolution:**
+#### **Cause 3: Rate Limiting**
 ```bash
-# Optimize database
-./tools/sqlite-maintenance.sh --full
+# Let's Encrypt rate limits
+# Check for rate limit errors in logs
+docker compose logs caddy | grep -i "rate limit"
 
-# Update statistics
-./tools/sqlite-maintenance.sh --analyze
-
-# Check for lock issues
-./tools/sqlite-maintenance.sh --check-locks
-
-# Consider increasing resources
-# Edit docker-compose.yml memory limits
+# If rate limited, wait or use staging environment
+# Edit Caddyfile temporarily:
+# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
 ```
 
-### Resource Exhaustion
-
-#### Issue: Disk Space Full
-**Symptoms:**
-- "No space left on device" errors
-- Container startup failures
-- Backup failures
-
-**Diagnosis:**
+#### **Solution Steps**:
 ```bash
-# Check disk usage
-df -h
+# 1. Verify domain accessibility
+curl -I http://your-domain.com
 
-# Find largest files/directories
-du -sh /* 2>/dev/null | sort -hr
-du -sh /var/lib/* 2>/dev/null | sort -hr
+# 2. Reload Caddy configuration
+docker compose exec caddy caddy reload
 
-# Check VaultWarden specific usage
-du -sh /var/lib/*/
-du -sh /var/lib/*/logs/
-du -sh /var/lib/*/backups/
+# 3. Force certificate renewal
+docker compose exec caddy caddy certificates --renew
+
+# 4. Restart Caddy if needed
+docker compose restart caddy
+
+# 5. Check certificate installation
+openssl s_client -connect your-domain.com:443 -servername your-domain.com < /dev/null
 ```
 
-**Resolution:**
+---
+
+### **Issue: CloudFlare Integration Problems**
+
+**Symptoms**:
+- Orange cloud (proxied) causing SSL issues
+- Real visitor IP not detected correctly
+- Fail2ban not blocking at CloudFlare edge
+
+**CloudFlare SSL Configuration**:
 ```bash
-# Clean up logs
-find /var/lib/*/logs -name "*.log" -size +50M -exec truncate -s 10M {} \;
+# Required CloudFlare SSL settings:
+# SSL/TLS Mode: "Full (strict)"
+# Always Use HTTPS: Enabled
+# Minimum TLS Version: 1.2
 
-# Clean up old backups
-find /var/lib/*/backups -name "*.gpg" -mtime +30 -delete
+# Check if CloudFlare IPs are updated
+cat caddy/cloudflare-ips.caddy
 
-# Clean Docker resources
-docker system prune -f
-docker volume prune -f
+# Update CloudFlare IP ranges
+./tools/update-cloudflare-ips.sh
 
-# Compress large files
-find /var/lib/*/logs -name "*.log" -size +10M -exec gzip {} \;
-
-# Move backups to external storage
-# Configure backup upload to cloud storage
+# Verify IP range format
+grep -E "trusted_proxies|real_ip" caddy/cloudflare-ips.caddy
 ```
 
-#### Issue: Memory Exhaustion
-**Symptoms:**
-- Out of memory errors
-- Container killing (OOMKilled)
-- System slowdown
-
-**Diagnosis:**
+**Fail2ban CloudFlare Integration**:
 ```bash
-# Check memory usage
-free -h
-ps aux --sort=-%mem | head -10
+# Check CloudFlare action configuration
+cat fail2ban/action.d/cloudflare.conf | grep -A 5 "\[Init\]"
 
-# Check container memory usage
-docker stats --no-stream
+# Verify credentials are set
+grep "cfuser\|cftoken" fail2ban/action.d/cloudflare.conf
 
-# Check for memory leaks
-pmap -d $(pgrep -f vaultwarden)
+# Test CloudFlare API connectivity
+curl -X GET "https://api.cloudflare.com/client/v4/user/firewall/access_rules/rules" \
+     -H "X-Auth-Email: your-email@example.com" \
+     -H "X-Auth-Key: your-api-key"
 ```
 
-**Resolution:**
+## 📊 **Application and Database Issues**
+
+### **Issue: VaultWarden Admin Panel Access Denied**
+
+**Symptoms**:
+- "Invalid admin token" message
+- "Unauthorized" error
+- Cannot access `/admin` endpoint
+
+**Diagnostic Steps**:
+
+#### **Step 1: Verify Admin Token**
 ```bash
-# Increase container memory limits
-# Edit docker-compose.yml:
-# memory: 1G (increase from 512M)
+# Get current admin token
+sudo jq -r '.ADMIN_TOKEN' settings.json
 
-# Add swap if needed
-fallocate -l 2G /swapfile
-chmod 600 /swapfile
-mkswap /swapfile
-swapon /swapfile
-
-# Restart containers with new limits
-./startup.sh
-
-# Monitor memory usage
-watch -n 5 'free -h && docker stats --no-stream'
+# Check if token is empty or null
+if [[ "$(sudo jq -r '.ADMIN_TOKEN' settings.json)" == "null" ]]; then
+    echo "Admin token is null - needs regeneration"
+fi
 ```
 
-## Security and Authentication Issues
-
-### Authentication Problems
-
-#### Issue: Admin Panel Access Denied
-**Symptoms:**
-- "Invalid admin token" messages
-- Cannot access /admin endpoint
-- Authentication failures
-
-**Diagnosis:**
+#### **Step 2: Regenerate Admin Token**
 ```bash
-# Check admin token
-jq -r '.ADMIN_TOKEN' settings.json
-
-# Verify token is not empty
-[[ -n "$(jq -r '.ADMIN_TOKEN' settings.json)" ]] && echo "Token exists" || echo "Token missing"
-
-# Check VaultWarden logs for auth errors
-docker compose logs vaultwarden | grep -i admin
-```
-
-**Resolution:**
-```bash
-# Generate new admin token
+# Generate new secure token
 NEW_TOKEN=$(openssl rand -base64 32)
 
-# Update configuration
-jq --arg token "$NEW_TOKEN" '.ADMIN_TOKEN = $token' settings.json > settings.json.tmp
-mv settings.json.tmp settings.json
-chmod 600 settings.json
+# Update configuration file
+sudo jq --arg token "$NEW_TOKEN" '.ADMIN_TOKEN = $token' settings.json > temp.json
+sudo mv temp.json settings.json
+sudo chmod 600 settings.json
 
 # Restart services
 ./startup.sh
 
-# Access admin panel with new token
+# Display new token
 echo "New admin token: $NEW_TOKEN"
 ```
 
-#### Issue: User Login Failures
-**Symptoms:**
-- Users cannot log in
-- "Invalid credentials" errors
-- Database authentication errors
-
-**Diagnosis:**
+#### **Step 3: Browser and Cache Issues**
 ```bash
-# Check VaultWarden logs
-docker compose logs vaultwarden | grep -i "login\|auth"
+# Clear browser data for the domain:
+# 1. Open browser developer tools (F12)
+# 2. Right-click refresh button → "Empty Cache and Hard Reload"
+# 3. Or manually clear cookies/cache for the domain
 
-# Check database connectivity
+# Test with different browser or incognito mode
+# Test with curl
+curl -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+     https://your-domain.com/admin/config
+```
+
+---
+
+### **Issue: Database Lock or SQLite Busy Errors**
+
+**Symptoms**:
+```bash
+database is locked
+SQLite error: database is busy
+VaultWarden fails to start with database errors
+```
+
+**Diagnostic Commands**:
+```bash
+# Check processes accessing database
+sudo lsof /var/lib/*/data/bwdata/db.sqlite3
+
+# Check database file permissions
+ls -la /var/lib/*/data/bwdata/db.sqlite3
+
+# Check database integrity
 ./tools/sqlite-maintenance.sh --check
-
-# Verify user exists in database
-echo "SELECT email FROM users;" | sqlite3 /var/lib/*/data/bwdata/db.sqlite3
 ```
 
-**Resolution:**
+**Solution Steps**:
+
+#### **Step 1: Stop All Containers**
 ```bash
-# Reset user password via admin panel
-# Or create new user account
-
-# Check SMTP configuration for password reset
-grep SMTP settings.json
-
-# Verify email functionality
-./tools/monitor.sh --test-email
-
-# Clear browser cache and cookies
-# Try from different browser/device
-```
-
-### SSL/TLS Issues
-
-#### Issue: SSL Certificate Errors
-**Symptoms:**
-- "Certificate not valid" warnings
-- "Connection not secure" messages
-- Certificate chain problems
-
-**Diagnosis:**
-```bash
-# Check certificate details
-openssl s_client -connect vault.example.com:443 -servername vault.example.com
-
-# Check certificate expiration
-echo | openssl s_client -connect vault.example.com:443 2>/dev/null | openssl x509 -noout -dates
-
-# Verify certificate chain
-curl -I https://vault.example.com
-```
-
-**Resolution:**
-```bash
-# Force certificate renewal
-docker compose exec caddy caddy reload
-
-# Check domain accessibility from internet
-curl -I http://vault.example.com
-# Must be accessible for ACME validation
-
-# Reset certificate data if needed
+# Clean shutdown
 docker compose down
-docker volume rm caddy_data
+
+# Wait for complete shutdown
+sleep 10
+
+# Verify no containers running
+docker compose ps
+```
+
+#### **Step 2: Check Database Access**
+```bash
+# Verify no other processes are using database
+sudo lsof /var/lib/*/data/bwdata/db.sqlite3
+
+# If processes found, identify and stop them
+sudo kill -9 PID_NUMBER
+```
+
+#### **Step 3: Database Integrity Check**
+```bash
+# Test database accessibility
+sudo sqlite3 /var/lib/*/data/bwdata/db.sqlite3 "PRAGMA integrity_check;"
+
+# If corruption detected:
+sudo sqlite3 /var/lib/*/data/bwdata/db.sqlite3 ".recover" > recovered.sql
+
+# Create new database from recovered data
+sudo mv /var/lib/*/data/bwdata/db.sqlite3 db.sqlite3.backup
+sudo sqlite3 /var/lib/*/data/bwdata/db.sqlite3 < recovered.sql
+```
+
+#### **Step 4: Restart Services**
+```bash
+# Clean restart
 ./startup.sh
 
-# Wait for certificate generation (5-10 minutes)
+# Monitor for errors
+docker compose logs -f vaultwarden
 ```
 
-## Backup and Recovery Issues
+---
 
-### Backup Failures
+### **Issue: Backup and Restore Failures**
 
-#### Issue: Database Backup Fails
-**Symptoms:**
-- "Backup creation failed" errors
-- GPG encryption errors
-- Insufficient disk space for backups
+**Symptoms**:
+- Backup scripts fail with permission errors
+- Restore process unable to access files
+- Backup files corrupted or unreadable
 
-**Diagnosis:**
+**Backup Troubleshooting**:
+
+#### **Check Backup Directory Permissions**
 ```bash
-# Test backup creation
-./tools/db-backup.sh --dry-run --verbose
-
-# Check backup directory permissions
+# Verify backup directory exists and is writable
 ls -ld /var/lib/*/backups/
+# Should show: drwx------ (700 permissions)
 
-# Check GPG configuration
-gpg --list-keys
-
-# Check disk space
+# Check available disk space
 df -h /var/lib/*/backups/
+
+# Check backup process
+./tools/db-backup.sh --dry-run
 ```
 
-**Resolution:**
+#### **Test Backup Creation**
 ```bash
-# Fix backup directory permissions
-chmod 700 /var/lib/*/backups/
-chown root:root /var/lib/*/backups/
+# Enable debug mode for detailed output
+DEBUG=1 ./tools/db-backup.sh
 
-# Test GPG encryption
-echo "test" | gpg --symmetric --batch --passphrase "test123" --cipher-algo AES256
-
-# Free up disk space
-find /var/lib/*/backups -name "*.gpg" -mtime +30 -delete
-
-# Retry backup
-./tools/db-backup.sh --verbose
+# Check for specific error types:
+# - Permission denied: Check file ownership
+# - No space left: Clean old backups or increase storage
+# - SQLite busy: Stop VaultWarden temporarily
 ```
 
-#### Issue: Restore Process Fails
-**Symptoms:**
-- "Cannot restore from backup" errors
-- Backup file corruption
-- Permission denied during restore
-
-**Diagnosis:**
+#### **Verify Backup Integrity**
 ```bash
-# Test backup integrity
-./tools/db-backup.sh --verify /path/to/backup.gpg
+# List recent backups
+ls -la /var/lib/*/backups/db/ | tail -10
 
-# Check restore permissions
-ls -la /var/lib/*/data/
+# Test backup file integrity
+./tools/restore.sh --verify /path/to/backup/file
 
-# Test GPG decryption
-gpg --decrypt --batch --passphrase "$BACKUP_PASSPHRASE" backup.gpg
+# Test extraction without restoration
+tar -tzf /path/to/backup.tar.gz
 ```
 
-**Resolution:**
+**Restore Troubleshooting**:
+
+#### **Pre-Restore Checks**
 ```bash
 # Stop services before restore
 docker compose down
 
-# Fix data directory permissions
-chown -R 1000:1000 /var/lib/*/data/
+# Verify backup file exists and is readable
+ls -la /path/to/backup/file
+file /path/to/backup/file
 
-# Use interactive restore
-./tools/restore.sh
-
-# Verify restoration
-./startup.sh --validate
+# Check available disk space
+df -h /var/lib/*/
 ```
 
-## Monitoring and Alerting Issues
-
-### Monitoring System Problems
-
-#### Issue: Health Checks Failing
-**Symptoms:**
-- Continuous "unhealthy" status
-- False positive alerts
-- Monitoring script errors
-
-**Diagnosis:**
+#### **Restore Process Debugging**
 ```bash
-# Run monitoring with verbose output
-./tools/monitor.sh --verbose
+# Run restore with debug output
+DEBUG=1 ./tools/restore.sh /path/to/backup
 
-# Check specific health checks
-./tools/monitor.sh --containers
-./tools/monitor.sh --services
-./tools/monitor.sh --resources
+# Manual extraction test
+cd /tmp
+tar -xzf /path/to/backup.tar.gz
+ls -la extracted/
 ```
 
-**Resolution:**
+## 🔧 **System Resource and Performance Issues**
+
+### **Issue: High Memory Usage**
+
+**Symptoms**:
+- Containers being killed (OOMKilled)
+- System becomes unresponsive
+- "Cannot allocate memory" errors
+
+**Diagnostic Commands**:
 ```bash
-# Fix specific issues identified by monitoring
-# Common fixes:
-
-# Restart failed containers
-docker compose restart
-
-# Clean up resources
-docker system prune -f
-
-# Fix file permissions
-./tools/monitor.sh --fix-permissions
-
-# Update monitoring thresholds if too sensitive
-# Edit monitoring script thresholds
-```
-
-#### Issue: Email Alerts Not Working
-**Symptoms:**
-- No email notifications received
-- SMTP connection errors
-- Email delivery failures
-
-**Diagnosis:**
-```bash
-# Test SMTP configuration
-./tools/monitor.sh --test-email
-
-# Check SMTP settings
-grep SMTP settings.json
-
-# Test SMTP connectivity
-telnet smtp.gmail.com 587
-```
-
-**Resolution:**
-```bash
-# Update SMTP configuration
-nano settings.json
-
-# For Gmail, use App Password
-# Generate at: https://myaccount.google.com/apppasswords
-
-# Test email sending
-echo "Test message" | mail -s "VaultWarden Test" admin@example.com
-
-# Check mail logs
-tail -f /var/log/mail.log
-```
-
-## Advanced Troubleshooting
-
-### Log Analysis
-
-#### Centralized Log Review
-```bash
-# Create comprehensive log analysis script
-cat << 'EOF' > analyze_logs.sh
-#!/bin/bash
-echo "=== Error Analysis (Last 24 Hours) ==="
-find /var/lib/*/logs -name "*.log" -mtime -1 -exec grep -l -i error {} \; | while read log; do
-    echo "=== Errors in $log ==="
-    grep -i error "$log" | tail -10
-    echo
-done
-
-echo "=== Authentication Issues ==="
-docker compose logs vaultwarden | grep -i "auth\|login" | tail -20
-
-echo "=== Certificate Issues ==="
-docker compose logs caddy | grep -i "certificate\|tls\|ssl" | tail -10
-
-echo "=== Resource Issues ==="
-docker compose logs | grep -i -E "memory\|disk\|space" | tail -10
-EOF
-
-chmod +x analyze_logs.sh
-./analyze_logs.sh
-```
-
-### Performance Analysis
-
-#### System Performance Debugging
-```bash
-# Monitor system performance during issues
-cat << 'EOF' > performance_debug.sh
-#!/bin/bash
-echo "=== System Performance Analysis ==="
-echo "Load Average:"
-uptime
-
-echo "Memory Usage:"
+# Check overall system memory
 free -h
 
-echo "Disk Usage:"
-df -h
-
-echo "Top Processes:"
-ps aux --sort=-%cpu | head -10
-
-echo "Container Stats:"
+# Check container memory usage
 docker stats --no-stream
 
-echo "Network Connections:"
-ss -tlnp | grep -E ':80|:443'
+# Check memory limits
+docker compose config | grep -A 5 -B 5 memory
 
-echo "Database Performance:"
-./tools/sqlite-maintenance.sh --stats
-EOF
-
-chmod +x performance_debug.sh
-./performance_debug.sh
+# Check for memory leaks
+docker compose exec vaultwarden ps aux
 ```
 
-### Recovery Procedures
+**Solutions**:
 
-#### Emergency Recovery Script
+#### **Adjust Container Limits**
 ```bash
-# Create emergency recovery script
-cat << 'EOF' > emergency_recovery.sh
+# Edit docker-compose.yml memory limits
+# For larger teams (5-10 users):
+services:
+  vaultwarden:
+    deploy:
+      resources:
+        limits:
+          memory: 1G  # Increase from 512M
+          cpus: '2.0'
+        reservations:
+          memory: 512M
+          cpus: '1.0'
+```
+
+#### **System Memory Management**
+```bash
+# Clear page cache (safe)
+sudo sync && sudo sysctl vm.drop_caches=1
+
+# Check for memory-intensive processes
+ps aux --sort=-%mem | head -10
+
+# Monitor memory usage over time
+watch -n 5 'free -h && docker stats --no-stream'
+```
+
+---
+
+### **Issue: Disk Space Exhaustion**
+
+**Symptoms**:
+- "No space left on device" errors
+- Backup failures
+- Log files growing indefinitely
+
+**Disk Usage Analysis**:
+```bash
+# Check overall disk usage
+df -h
+
+# Find largest directories
+sudo du -sh /var/lib/*/ | sort -rh | head -10
+sudo du -sh /var/log/* | sort -rh | head -10
+
+# Check inode usage
+df -i
+```
+
+**Cleanup Solutions**:
+
+#### **Automated Cleanup**
+```bash
+# Clean Docker system (removes unused containers, networks, images)
+docker system prune -f
+
+# Clean old logs (size-based)
+sudo find /var/lib/*/logs -name "*.log" -size +50M -exec truncate -s 10M {} \;
+
+# Clean old backups (age-based)
+sudo find /var/lib/*/backups -name "*.backup*" -mtime +30 -delete
+
+# Verify cron cleanup is working
+crontab -l | grep cleanup
+```
+
+#### **Manual Cleanup**
+```bash
+# Identify largest log files
+sudo find /var/lib/*/logs -name "*.log" -exec du -sh {} \; | sort -rh
+
+# Truncate specific large log files
+sudo truncate -s 0 /var/lib/*/logs/caddy/access.log
+
+# Remove old backup files (keep last 10)
+cd /var/lib/*/backups/db/
+sudo ls -t *.backup | tail -n +11 | xargs rm -f
+```
+
+---
+
+### **Issue: Poor Performance or Slow Response Times**
+
+**Symptoms**:
+- Web interface loads slowly
+- Database queries timeout
+- High CPU usage
+
+**Performance Diagnostics**:
+```bash
+# Check system load
+uptime
+top -bn1 | head -20
+
+# Check container resource usage
+docker stats
+
+# Check database performance
+./tools/sqlite-maintenance.sh --analyze
+
+# Check network latency
+ping -c 10 your-domain.com
+```
+
+**Performance Optimization**:
+
+#### **Database Optimization**
+```bash
+# Run database maintenance
+./tools/sqlite-maintenance.sh --full
+
+# Check database size and structure
+sqlite3 /var/lib/*/data/bwdata/db.sqlite3 ".schema" | head -20
+sqlite3 /var/lib/*/data/bwdata/db.sqlite3 "PRAGMA database_list;"
+```
+
+#### **Resource Allocation**
+```bash
+# Increase VaultWarden resources for larger teams
+# Edit docker-compose.yml:
+services:
+  vaultwarden:
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+
+# Restart with new limits
+./startup.sh
+```
+
+## 🔐 **Security and Access Issues**
+
+### **Issue: Fail2ban Not Working**
+
+**Symptoms**:
+- Obvious attacks not being blocked
+- fail2ban service not running
+- No banned IPs despite suspicious activity
+
+**Diagnostic Commands**:
+```bash
+# Check fail2ban service status
+sudo systemctl status fail2ban
+
+# Check active jails
+sudo fail2ban-client status
+
+# Check specific jail status
+sudo fail2ban-client status vaultwarden
+sudo fail2ban-client status sshd
+
+# Check fail2ban logs
+sudo tail -f /var/log/fail2ban.log
+```
+
+**Configuration Verification**:
+```bash
+# Check jail configuration
+sudo fail2ban-client get vaultwarden logpath
+sudo fail2ban-client get vaultwarden bantime
+sudo fail2ban-client get vaultwarden maxretry
+
+# Test log file accessibility
+sudo ls -la /var/lib/*/logs/caddy/access.log
+sudo ls -la /var/lib/*/logs/vaultwarden/vaultwarden.log
+
+# Verify filter patterns
+sudo fail2ban-regex /var/lib/*/logs/vaultwarden/vaultwarden.log /etc/fail2ban/filter.d/vaultwarden.conf
+```
+
+**Solutions**:
+
+#### **Restart Fail2ban**
+```bash
+# Restart fail2ban service
+sudo systemctl restart fail2ban
+
+# Check if jails are active after restart
+sudo fail2ban-client status
+
+# Reload jail configuration
+sudo fail2ban-client reload
+```
+
+#### **Fix Configuration Issues**
+```bash
+# Check jail configuration syntax
+sudo fail2ban-client -t
+
+# Verify log file paths
+sudo fail2ban-client set vaultwarden addlogpath /var/lib/*/logs/vaultwarden/vaultwarden.log
+
+# Test CloudFlare action (if configured)
+sudo fail2ban-client set vaultwarden banip 192.0.2.1
+sudo fail2ban-client set vaultwarden unbanip 192.0.2.1
+```
+
+---
+
+### **Issue: UFW Firewall Problems**
+
+**Symptoms**:
+- Cannot access services despite correct container status
+- Firewall blocking legitimate traffic
+- UFW rules not applying correctly
+
+**UFW Diagnostics**:
+```bash
+# Check UFW status and rules
+sudo ufw status verbose
+sudo ufw status numbered
+
+# Check UFW logging
+sudo tail -f /var/log/ufw.log
+
+# Test specific rule functionality
+sudo ufw --dry-run allow 443/tcp
+```
+
+**Common UFW Issues and Solutions**:
+
+#### **UFW Blocking Container Traffic**
+```bash
+# Check if UFW is interfering with Docker
+sudo ufw status | grep -E "(80|443)"
+
+# Ensure Docker rules are preserved
+sudo systemctl restart docker
+sudo ufw reload
+
+# Add explicit allow rules if needed
+sudo ufw allow in on docker0
+sudo ufw allow out on docker0
+```
+
+#### **Reset UFW Configuration**
+```bash
+# If UFW configuration is corrupted, reset
+sudo ufw --force reset
+
+# Reconfigure basic rules
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow ssh
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw --force enable
+```
+
+## 📋 **Diagnostic Checklists**
+
+### **Complete System Health Check**
+```bash
 #!/bin/bash
-set -e
+# Comprehensive system diagnostic script
 
-echo "=== VaultWarden Emergency Recovery ==="
+echo "=== System Health Check ==="
 
-echo "Step 1: Stop all services"
-docker compose down
+# 1. Basic system status
+echo "1. System Resources:"
+free -h
+df -h /var/lib/*/
 
-echo "Step 2: Backup current state"
-mkdir -p /tmp/vaultwarden_emergency_backup
-cp -r /var/lib/*/data /tmp/vaultwarden_emergency_backup/
-cp settings.json /tmp/vaultwarden_emergency_backup/
+# 2. Service status
+echo "2. Docker Status:"
+systemctl is-active docker
+docker compose ps
 
-echo "Step 3: Fix permissions"
-chown -R root:root /opt/VaultWarden-OCI-Minimal
-chown -R 1000:1000 /var/lib/*/data/bwdata/
-chmod 600 settings.json
+# 3. Network connectivity
+echo "3. Network Tests:"
+ping -c 3 8.8.8.8
+nslookup $(grep DOMAIN settings.json | cut -d'"' -f4)
 
-echo "Step 4: Validate configuration"
+# 4. Configuration validation
+echo "4. Configuration:"
 ./startup.sh --validate
 
-echo "Step 5: Start services"
-./startup.sh
+# 5. Security services
+echo "5. Security Status:"
+sudo systemctl is-active ufw fail2ban
 
-echo "Step 6: Health check"
-sleep 30
-./tools/monitor.sh --summary
+# 6. Recent errors
+echo "6. Recent Errors:"
+docker compose logs --tail=10 --since=1h | grep -i error
 
-echo "=== Recovery Complete ==="
-echo "Backup location: /tmp/vaultwarden_emergency_backup"
-EOF
-
-chmod +x emergency_recovery.sh
+echo "=== Health Check Complete ==="
 ```
 
-This troubleshooting guide provides systematic approaches to identify and resolve issues while maintaining the system's reliability and the "set and forget" operational philosophy.
+### **Pre-Deployment Checklist**
+```bash
+# Run before considering deployment complete
+- [ ] chmod +x startup.sh tools/*.sh
+- [ ] sudo ./tools/init-setup.sh completed successfully
+- [ ] ./startup.sh starts all containers
+- [ ] docker compose ps shows all healthy
+- [ ] curl -I https://domain.com returns HTTP 200
+- [ ] Admin panel accessible with generated token
+- [ ] SSL certificate valid (check with browser)
+- [ ] UFW firewall active with proper rules
+- [ ] Fail2ban active with configured jails
+- [ ] Backup system tested and working
+- [ ] Monitoring cron jobs installed
+- [ ] SMTP notifications configured (optional)
+- [ ] CloudFlare integration working (optional)
+```
+
+### **Incident Response Checklist**
+```bash
+# When services are down or malfunctioning
+1. Check container status: docker compose ps
+2. Review recent logs: docker compose logs --tail=50
+3. Check system resources: free -h && df -h
+4. Verify configuration: ./startup.sh --validate
+5. Check security services: systemctl status ufw fail2ban
+6. Test network connectivity: ping domain.com
+7. Review automation logs: journalctl -t monitor
+8. Create diagnostic backup: ./tools/create-full-backup.sh --emergency
+9. Document incident: Record time, symptoms, resolution
+10. Post-incident: Review monitoring for prevention
+```
+
+## 🆘 **Getting Additional Help**
+
+### **Log Collection for Support**
+```bash
+# Collect comprehensive diagnostic information
+mkdir -p /tmp/vaultwarden-diagnostics
+cd /tmp/vaultwarden-diagnostics
+
+# System information
+uname -a > system-info.txt
+free -h >> system-info.txt
+df -h >> system-info.txt
+
+# Configuration (redacted)
+sudo jq 'with_entries(if .key | contains("TOKEN") or contains("PASSWORD") or contains("KEY") then .value = "[REDACTED]" else . end)' /opt/VaultWarden-OCI-Minimal/settings.json > config-redacted.json
+
+# Service status
+docker compose ps > container-status.txt
+systemctl status docker ufw fail2ban > service-status.txt
+
+# Recent logs (last 100 lines)
+docker compose logs --tail=100 > container-logs.txt
+sudo tail -100 /var/log/syslog > system-logs.txt
+
+# Create archive
+tar -czf vaultwarden-diagnostics-$(date +%Y%m%d_%H%M%S).tar.gz *
+
+echo "Diagnostic archive created: $(pwd)/vaultwarden-diagnostics-*.tar.gz"
+echo "Share this file when requesting support"
+```
+
+### **Support Resources**
+- **GitHub Issues**: [Report bugs and request features](https://github.com/killer23d/VaultWarden-OCI-Minimal/issues)
+- **Discussions**: [Community Q&A and troubleshooting](https://github.com/killer23d/VaultWarden-OCI-Minimal/discussions)
+- **Documentation**: Complete guides in `/docs/` directory
+- **VaultWarden Wiki**: [Official VaultWarden documentation](https://github.com/dani-garcia/vaultwarden/wiki)
+
+### **Emergency Recovery**
+```bash
+# If system is completely broken, emergency recovery:
+1. Stop all services: docker compose down
+2. Create emergency backup: cp -r /var/lib/* /tmp/emergency-backup/
+3. Check available backups: ls -la /var/lib/*/backups/
+4. Restore from recent backup: ./tools/restore.sh /path/to/backup
+5. If no backups, reinstall: sudo ./tools/init-setup.sh --force
+6. Document what went wrong for prevention
+```
+
+Remember: The goal is always to maintain the "set and forget" operational model while providing comprehensive diagnostic capabilities when issues do arise."""
