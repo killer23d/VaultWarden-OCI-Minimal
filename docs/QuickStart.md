@@ -1,271 +1,317 @@
 # Quick Start Guide
 
-## Overview
+> **🎯 Goal**: From zero to production VaultWarden in 30 minutes with full automation, monitoring, and security.
 
-This guide gets you from zero to a fully operational VaultWarden instance in under 30 minutes. VaultWarden-OCI-Minimal is designed for rapid deployment with automated setup and configuration.
+## ⚠️ **Critical Prerequisites**
 
-## Prerequisites Checklist
+### **Setup Order (MANDATORY)**
+```bash
+# 1. FIRST: Make scripts executable
+chmod +x startup.sh tools/*.sh
 
-### Server Requirements
-- [ ] **Ubuntu 24.04 LTS** (minimal installation supported)
-- [ ] **2GB RAM minimum** (4GB recommended for 10 users)
-- [ ] **20GB storage minimum** (50GB recommended)
-- [ ] **Internet connectivity** for setup and updates
-- [ ] **Root or sudo access**
+# 2. SECOND: Run setup (installs everything)
+sudo ./tools/init-setup.sh
 
-### Network Requirements
-- [ ] **Domain name** registered and configured
-- [ ] **DNS pointing** to your server IP address
-- [ ] **Ports 22, 80, 443** accessible from internet
-- [ ] **Cloudflare account** (optional but recommended)
+# 3. THIRD: Start services (loads config and health checks)
+./startup.sh
 
-### Access Information
-- [ ] **Server IP address**
-- [ ] **SSH private key** or password
-- [ ] **Domain name** you'll use (e.g., vault.example.com)
-- [ ] **Email address** for admin notifications
+# ❌ NEVER run 'docker compose up' directly
+# ❌ NEVER skip init-setup.sh
+# ❌ NEVER run startup.sh before init-setup.sh
+```
 
-## 30-Minute Deployment
+### **System Requirements**
+- **OS**: Ubuntu 24.04 LTS (minimal install OK)
+- **RAM**: 2GB minimum (4GB recommended for 10 users)
+- **Storage**: 20GB minimum (50GB recommended)
+- **Network**: Internet connectivity, ports 22/80/443 accessible
+- **Access**: Root or sudo privileges
 
-### Step 1: Server Access (2 minutes)
+### **Information You'll Need**
+- **Domain name**: `vault.yourdomain.com` (DNS pointing to server)
+- **Email address**: For admin notifications
+- **SMTP credentials**: (optional, can configure later)
+- **CloudFlare account**: (optional, for enhanced security)
 
-#### Connect to Your Server
+## 🚀 **30-Minute Deployment**
+
+### **Phase 1: Server Preparation (5 minutes)**
+
+#### **Connect and Update**
 ```bash
 # SSH to your server
-ssh -i your-key.pem ubuntu@YOUR_SERVER_IP
+ssh ubuntu@YOUR_SERVER_IP
 
-# Switch to root (or use sudo for all commands)
+# Switch to root
 sudo su -
 
-# Update system (recommended)
+# Update system (recommended but optional)
 apt update && apt upgrade -y
+
+# Verify requirements
+free -h              # Check RAM
+df -h                # Check disk space
+ping -c 3 google.com # Check connectivity
 ```
 
-#### Verify System Requirements
+#### **Download Project**
 ```bash
-# Check OS version
-cat /etc/os-release
-
-# Check available memory
-free -h
-
-# Check disk space
-df -h
-
-# Check internet connectivity
-ping -c 3 google.com
-```
-
-### Step 2: Download and Setup (5 minutes)
-
-#### Clone Repository
-```bash
-# Navigate to installation directory
+# Navigate to standard location
 cd /opt
 
-# Clone the repository
+# Clone repository (replace URL with your fork if customized)
 git clone https://github.com/killer23d/VaultWarden-OCI-Minimal.git
 
 # Enter project directory
 cd VaultWarden-OCI-Minimal
 
-# Make scripts executable
+# CRITICAL: Make scripts executable (Git doesn't preserve this)
 chmod +x startup.sh tools/*.sh
 
-# Verify files
-ls -la tools/
+# Verify executable permissions
+ls -la tools/ | grep rwx
 ```
 
-### Step 3: Automated Installation (15 minutes)
+### **Phase 2: Automated Installation (15 minutes)**
 
-#### Run Complete Setup
+#### **Run Complete Setup**
 ```bash
-# Run the comprehensive setup script
+# Execute the comprehensive setup script
 sudo ./tools/init-setup.sh
 
-# This script will:
-# ✅ Install Docker and required packages
-# ✅ Configure firewall and security (UFW, fail2ban)
-# ✅ Generate secure configuration with random tokens
-# ✅ Set up automated maintenance and monitoring
-# ✅ Create all required directories and permissions
-# ✅ Install cron jobs for backups and maintenance
+# This single command handles:
+# ✅ Docker and Docker Compose installation
+# ✅ UFW firewall configuration (SSH, HTTP, HTTPS)
+# ✅ Fail2ban installation and configuration
+# ✅ Secure random token generation
+# ✅ Directory structure creation with proper permissions
+# ✅ Cron jobs for automated maintenance
+# ✅ CloudFlare integration setup (if configured)
 ```
 
-#### Interactive Configuration
-During setup, provide the following information:
-```bash
-# Required Information
-Domain name: https://vault.example.com
-Admin email: admin@example.com
-SMTP host: smtp.gmail.com
-SMTP from address: noreply@example.com
+#### **Interactive Configuration**
+The setup script will prompt for:
 
-# Optional Information (can be configured later)
+**Required Settings:**
+```bash
+Domain name: https://vault.yourdomain.com
+Admin email: admin@yourdomain.com
+```
+
+**Optional Settings (can skip and configure later):**
+```bash
+SMTP host: smtp.gmail.com
+SMTP from: noreply@yourdomain.com
 SMTP username: (leave blank if unsure)
 SMTP password: (leave blank if unsure)
-Cloudflare email: (for enhanced security)
-Cloudflare API key: (for fail2ban integration)
+CloudFlare email: (for fail2ban integration)
+CloudFlare API key: (for enhanced security)
 ```
 
-#### Automated Mode (For Scripts)
+#### **Non-Interactive Mode**
+For automation or if you want defaults:
 ```bash
-# Non-interactive setup with defaults
 sudo ./tools/init-setup.sh --auto
 ```
 
-### Step 4: Start Services (3 minutes)
-
-#### Launch VaultWarden
+#### **Setup Completion Verification**
 ```bash
-# Start all services using the startup script
+# Check that setup completed successfully
+ls -la settings.json  # Should exist with 600 permissions
+docker --version      # Should show Docker version
+sudo ufw status       # Should show active firewall
+sudo systemctl status fail2ban  # Should show active service
+```
+
+### **Phase 3: Service Launch (5 minutes)**
+
+#### **Start VaultWarden Stack**
+```bash
+# Launch all services with health checks
 ./startup.sh
 
-# Expected output:
-# ✅ Configuration loaded successfully
-# ✅ Environment prepared
-# ✅ Services started successfully
+# Expected output sequence:
+# 🔍 Loading configuration...
+# 🛠️  Preparing runtime environment...
+# 🔧 Executing pre-startup tasks...
+# 🚀 Starting services...
 # ✅ VaultWarden is healthy
-# ✅ Service information displayed
+# ✅ Caddy is running
+# ✅ Fail2ban is running
+# ℹ️  Service information displayed
 ```
 
-#### Verify Deployment
+#### **Verify Deployment Success**
 ```bash
-# Check container status
+# 1. Check container status
 docker compose ps
+# All containers should show "Up" and VaultWarden should be "healthy"
 
-# Expected output shows all containers as "Up" and "healthy"
-# - vaultwarden: Up (healthy)
-# - caddy: Up (healthy)
-# - fail2ban: Up
-# - watchtower: Up
+# 2. Test web connectivity
+curl -I https://vault.yourdomain.com
+# Should return HTTP/2 200 or HTTP/1.1 200
 
-# Test web interface
-curl -I https://vault.example.com
-# Should return "HTTP/2 200" or "HTTP/1.1 200"
+# 3. Check SSL certificate
+echo | openssl s_client -connect vault.yourdomain.com:443 -servername vault.yourdomain.com 2>/dev/null | openssl x509 -noout -text | grep -A 2 "Validity"
+# Should show valid certificate dates
+
+# 4. Verify admin access
+curl -I https://vault.yourdomain.com/admin
+# Should return HTTP 200 (might redirect to login)
 ```
 
-### Step 5: Initial Configuration (5 minutes)
+### **Phase 4: Initial Access (5 minutes)**
 
-#### Access Admin Panel
-1. **Open browser**: Navigate to `https://vault.example.com/admin`
-2. **Admin token**: Use token from `/opt/VaultWarden-OCI-Minimal/settings.json`
-   ```bash
-   # Get admin token
-   sudo jq -r '.ADMIN_TOKEN' /opt/VaultWarden-OCI-Minimal/settings.json
-   ```
-3. **Configure settings**:
-   - Disable user registration (if desired)
-   - Configure organization settings
-   - Set up SMTP if not done during installation
+#### **Get Admin Credentials**
+```bash
+# Retrieve the generated admin token
+sudo jq -r '.ADMIN_TOKEN' settings.json
 
-#### Create First User Account
-1. **Access main interface**: Navigate to `https://vault.example.com`
-2. **Create account**: 
-   - Either enable signup temporarily in admin panel
-   - Or create user directly in admin panel
+# Copy this token - you'll need it for admin panel access
+```
+
+#### **Access Admin Panel**
+1. **Open browser**: Navigate to `https://vault.yourdomain.com/admin`
+2. **Enter admin token**: Use the token from above
+3. **Configure initial settings**:
+   - Verify domain settings
+   - Configure user registration policy
+   - Set up organization settings (if needed)
+   - Configure SMTP if not done during setup
+
+#### **Create First User**
+1. **Access main interface**: `https://vault.yourdomain.com`
+2. **Create account**:
+   - If signups enabled: Register directly
+   - If signups disabled: Create user in admin panel
 3. **Test functionality**:
    - Log in to new account
    - Create a test vault item
-   - Verify synchronization works
+   - Verify data persistence
 
-## Post-Deployment Verification
+## ✅ **Post-Deployment Verification**
 
-### System Health Check
-
-#### Automated Health Verification
+### **Automated Health Check**
 ```bash
-# Comprehensive system validation
+# Run comprehensive system validation
 ./startup.sh --validate
 
-# Monitor system health
+# Run monitoring check
 ./tools/monitor.sh --summary
 
-# Expected output:
+# Expected results:
 # ✅ All containers healthy
-# ✅ Database accessible
-# ✅ SSL certificate valid
-# ✅ Backup system operational
+# ✅ Database accessible and optimized
+# ✅ SSL certificate valid and auto-renewing
+# ✅ Backup system configured and tested
+# ✅ Monitoring system operational
+# ✅ Security systems (firewall, fail2ban) active
 ```
 
-#### Manual Verification Steps
+### **Security Verification**
 ```bash
-# 1. Web interface accessibility
-curl -I https://vault.example.com
-# Should return HTTP 200
+# 1. Firewall status
+sudo ufw status verbose
+# Should show: SSH (22), HTTP (80), HTTPS (443) allowed, default deny
 
-# 2. SSL certificate verification
-openssl s_client -connect vault.example.com:443 -servername vault.example.com < /dev/null 2>/dev/null | openssl x509 -noout -text | grep -A 2 "Validity"
+# 2. Fail2ban protection
+sudo fail2ban-client status
+# Should list active jails: sshd, vaultwarden, caddy
 
-# 3. Database functionality
-./tools/sqlite-maintenance.sh --check
-# Should report "Database integrity: OK"
+# 3. File permissions
+ls -la settings.json
+# Should show: -rw------- 1 root root (600 permissions)
 
-# 4. Backup system test
+# 4. SSL security test (external)
+# Visit: https://www.ssllabs.com/ssltest/
+# Enter your domain, should get A+ rating
+```
+
+### **Backup System Verification**
+```bash
+# Test backup creation
 ./tools/db-backup.sh --dry-run
 # Should complete without errors
 
-# 5. Monitoring system test
-./tools/monitor.sh --test-all
-# Should pass all tests
+# Check automated backup schedule
+crontab -l | grep backup
+# Should show daily and weekly backup cron jobs
+
+# Verify backup directory
+ls -la /var/lib/*/backups/
+# Should exist with proper permissions
 ```
 
-### Security Verification
+## 🔧 **Essential Post-Setup Configuration**
 
-#### Firewall Configuration
+### **SMTP Configuration (Recommended)**
+
+If you skipped SMTP during setup, configure it now:
+
 ```bash
-# Check UFW status
-sudo ufw status verbose
+# Edit configuration
+sudo nano settings.json
 
-# Expected rules:
-# 22/tcp ALLOW IN
-# 80/tcp ALLOW IN
-# 443/tcp ALLOW IN
-# Default: deny (incoming), allow (outgoing)
-```
-
-#### Fail2ban Status
-```bash
-# Check fail2ban jails
-sudo fail2ban-client status
-
-# Expected jails:
-# - sshd (SSH protection)
-# - vaultwarden (Application protection)
-# - caddy (Proxy protection)
-```
-
-#### File Permissions
-```bash
-# Verify secure permissions
-ls -la /opt/VaultWarden-OCI-Minimal/settings.json
-# Should show: -rw------- 1 root root (600 permissions)
-
-ls -ld /var/lib/*/backups
-# Should show: drwx------ (700 permissions)
-```
-
-## Quick Configuration
-
-### Essential Settings
-
-#### Configure Email Notifications
-Edit `/opt/VaultWarden-OCI-Minimal/settings.json`:
-```json
+# Add/update SMTP settings
 {
   "SMTP_HOST": "smtp.gmail.com",
   "SMTP_PORT": 587,
   "SMTP_SECURITY": "starttls",
   "SMTP_USERNAME": "your-email@gmail.com",
   "SMTP_PASSWORD": "your-app-password",
-  "SMTP_FROM": "vaultwarden@yourdomain.com",
-  "ADMIN_EMAIL": "admin@yourdomain.com"
+  "SMTP_FROM": "vaultwarden@yourdomain.com"
 }
+
+# Restart services to apply changes
+./startup.sh
+
+# Test email functionality
+./tools/monitor.sh --test-email
 ```
 
-Then restart: `./startup.sh`
+**Gmail Setup Notes:**
+- Use App Password, not regular password
+- Generate at: https://myaccount.google.com/apppasswords
+- Enable 2FA on your Google account first
 
-#### Configure User Registration
+### **CloudFlare Configuration (Highly Recommended)**
+
+For enhanced security and performance:
+
+1. **DNS Setup**:
+   - Point your domain to CloudFlare nameservers
+   - Add A record pointing to your server IP
+   - Enable "Proxied" (orange cloud icon)
+
+2. **SSL Configuration**:
+   - Set SSL/TLS mode to "Full (strict)"
+   - Enable "Always Use HTTPS"
+   - Enable HSTS
+
+3. **Security Settings**:
+   - Set Security Level to "Medium" or higher
+   - Enable Bot Fight Mode
+   - Configure Rate Limiting
+
+4. **Fail2ban Integration**:
+   ```bash
+   # Edit CloudFlare credentials in config
+   sudo nano settings.json
+   
+   # Add CloudFlare API credentials
+   {
+     "CLOUDFLARE_EMAIL": "your-cf-email@example.com",
+     "CLOUDFLARE_API_KEY": "your-global-api-key"
+   }
+   
+   # Restart to enable CloudFlare fail2ban actions
+   ./startup.sh
+   ```
+
+### **User Registration Policy**
+
+Configure how users can join:
+
 ```json
 {
   "SIGNUPS_ALLOWED": false,
@@ -274,188 +320,250 @@ Then restart: `./startup.sh`
 }
 ```
 
-#### Enable Push Notifications (Optional)
-```json
-{
-  "PUSH_ENABLED": true,
-  "PUSH_INSTALLATION_ID": "your-installation-id",
-  "PUSH_INSTALLATION_KEY": "your-installation-key"
-}
-```
+Options:
+- **Open Registration**: `"SIGNUPS_ALLOWED": true`
+- **Invite Only**: `"SIGNUPS_ALLOWED": false, "INVITATIONS_ALLOWED": true`
+- **Admin Only**: Both false, create users in admin panel
 
-### Performance Tuning
+## 🚨 **Common Quick Start Issues**
 
-#### For Larger Teams (5-10 users)
-Edit `docker-compose.yml` resource limits:
-```yaml
-services:
-  vaultwarden:
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-          cpus: '2.0'
-        reservations:
-          memory: 512M
-          cpus: '1.0'
-```
+### **Issue 1: "Permission Denied" on Scripts**
 
-#### Database Optimization
+**Symptoms**: `bash: ./startup.sh: Permission denied`
+
+**Solution**:
 ```bash
-# Run database optimization
-./tools/sqlite-maintenance.sh --full
+# Make scripts executable (required after git clone)
+chmod +x startup.sh tools/*.sh
 
-# Schedule regular maintenance (already automated)
-crontab -l | grep sqlite-maintenance
+# Verify permissions
+ls -la startup.sh tools/
+# Should show 'rwx' for owner
 ```
 
-## Common Quick Start Issues
+### **Issue 2: "Cannot Access Web Interface"**
 
-### Issue 1: Cannot Access Web Interface
+**Symptoms**: Browser shows "connection refused" or timeout
 
-#### Symptoms
-- Browser shows "connection refused" or "site can't be reached"
-- `curl -I https://vault.example.com` fails
-
-#### Quick Fix
+**Root Cause Analysis**:
 ```bash
-# 1. Check container status
+# 1. Check if containers are running
 docker compose ps
-# If containers are down:
-./startup.sh
+# If down: ./startup.sh
 
-# 2. Check firewall
+# 2. Check firewall rules
 sudo ufw status
-# If ports 80/443 are not allowed:
+# If HTTP/HTTPS not allowed:
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 
-# 3. Check DNS
-nslookup vault.example.com
-# If DNS is not resolving, update your DNS settings
+# 3. Check if ports are bound
+sudo ss -tlnp | grep -E ":(80|443)"
+# Should show caddy listening on both ports
 
-# 4. Check domain configuration
-grep DOMAIN /opt/VaultWarden-OCI-Minimal/settings.json
-# Should match your actual domain
+# 4. Check DNS resolution
+nslookup vault.yourdomain.com
+# Should return your server's IP
+
+# 5. Check domain configuration
+grep DOMAIN settings.json
+# Should match your actual domain exactly
 ```
 
-### Issue 2: SSL Certificate Problems
+### **Issue 3: "SSL Certificate Problems"**
 
-#### Symptoms
-- Browser shows SSL warnings
-- Certificate appears invalid or self-signed
+**Symptoms**: Browser SSL warnings, invalid certificate
 
-#### Quick Fix
+**Solutions**:
 ```bash
-# 1. Wait for certificate generation (can take 5-10 minutes)
+# 1. Wait for automatic certificate generation (5-10 minutes)
 docker compose logs caddy | grep -i certificate
 
-# 2. Check Caddy configuration
-docker compose exec caddy caddy list-certificates
+# 2. Check if domain is publicly accessible (required for Let's Encrypt)
+# Use external tool: https://www.whatsmydns.net/
 
 # 3. Force certificate renewal
 docker compose exec caddy caddy reload
 
-# 4. Verify domain accessibility from internet
-# (Caddy needs to validate domain ownership)
+# 4. Check certificate status
+docker compose exec caddy caddy list-certificates
+
+# 5. For debugging, check if ACME challenge is accessible
+curl -I http://vault.yourdomain.com/.well-known/acme-challenge/test
+# Should NOT return 404 (firewall/CloudFlare issue)
 ```
 
-### Issue 3: Admin Panel Access Issues
+### **Issue 4: "Admin Panel Access Denied"**
 
-#### Symptoms
-- "Invalid admin token" message
-- Cannot access `/admin` endpoint
+**Symptoms**: "Invalid admin token" or "Unauthorized"
 
-#### Quick Fix
+**Solutions**:
 ```bash
-# 1. Get correct admin token
-sudo jq -r '.ADMIN_TOKEN' /opt/VaultWarden-OCI-Minimal/settings.json
+# 1. Get the correct admin token
+sudo jq -r '.ADMIN_TOKEN' settings.json
+# Copy this exact token
 
-# 2. Verify admin token is not empty
-# If empty, regenerate:
+# 2. If token is empty or null, regenerate
 openssl rand -base64 32
 
-# 3. Update settings.json with new token
-sudo nano /opt/VaultWarden-OCI-Minimal/settings.json
+# 3. Update configuration with new token
+sudo jq '.ADMIN_TOKEN = "NEW_TOKEN_HERE"' settings.json > temp.json
+sudo mv temp.json settings.json
+sudo chmod 600 settings.json
 
 # 4. Restart services
 ./startup.sh
+
+# 5. Clear browser cache and cookies for the domain
 ```
 
-### Issue 4: Email/SMTP Not Working
+### **Issue 5: "Database Lock" or "SQLite Busy"**
 
-#### Symptoms
-- No email notifications received
-- SMTP errors in logs
+**Symptoms**: VaultWarden fails to start, database errors in logs
 
-#### Quick Fix
+**Solutions**:
 ```bash
-# 1. Test SMTP connectivity
-telnet smtp.gmail.com 587
+# 1. Check if another process is using the database
+sudo lsof /var/lib/*/data/bwdata/db.sqlite3
 
-# 2. Check SMTP configuration
-grep SMTP /opt/VaultWarden-OCI-Minimal/settings.json
+# 2. Stop all containers and restart cleanly
+docker compose down
+./startup.sh
 
-# 3. For Gmail, use App Password instead of regular password
-# Generate at: https://myaccount.google.com/apppasswords
+# 3. Check database integrity
+./tools/sqlite-maintenance.sh --check
 
-# 4. Test email functionality
-./tools/monitor.sh --test-email
+# 4. If corrupted, restore from backup
+./tools/restore.sh --list
+./tools/restore.sh /path/to/recent/backup
 ```
 
-## Next Steps After Quick Start
+### **Issue 6: "Out of Disk Space"**
 
-### Immediate Actions (First Hour)
-1. **Backup Admin Token**: Save admin token securely
-2. **Create User Accounts**: Set up accounts for your team
-3. **Test Functionality**: Create vaults, add passwords, test sync
-4. **Configure Mobile Apps**: Install Bitwarden apps and test
+**Symptoms**: Containers failing, "no space left" errors
 
-### Within First Day
-1. **Setup Off-site Backups**: Configure cloud storage for backups
-2. **Configure Cloudflare**: Set up enhanced security and performance
-3. **Review Security Settings**: Audit admin panel configuration
-4. **Test Backup/Restore**: Verify backup system works correctly
-
-### Within First Week
-1. **Monitor System Health**: Review automated monitoring reports
-2. **Performance Tuning**: Adjust settings based on actual usage
-3. **User Training**: Train team on VaultWarden features
-4. **Documentation**: Document your specific configuration choices
-
-## Support and Resources
-
-### Built-in Help
+**Solutions**:
 ```bash
-# Get help for any script
-./startup.sh --help
-./tools/init-setup.sh --help
-./tools/monitor.sh --help
+# 1. Check disk usage
+df -h
 
-# View configuration paths
-source lib/config.sh && _get_project_paths
+# 2. Clean Docker system
+docker system prune -f
 
-# Check system status anytime
+# 3. Clean old logs
+sudo find /var/lib/*/logs -name "*.log" -size +50M -delete
+
+# 4. Clean old backups (if safe)
+sudo find /var/lib/*/backups -name "*.backup*" -mtime +30 -delete
+
+# 5. Check if log rotation is working
+crontab -l | grep log-cleanup
+```
+
+## 📋 **Quick Reference Commands**
+
+### **Essential Operations**
+```bash
+# Check system status
 ./tools/monitor.sh --summary
+
+# View all service logs
+docker compose logs -f
+
+# Restart all services
+./startup.sh
+
+# Stop all services
+docker compose down
+
+# Create manual backup
+./tools/create-full-backup.sh
+
+# Check service health
+docker compose ps
+
+# Get admin token
+sudo jq -r '.ADMIN_TOKEN' settings.json
 ```
 
-### Log Locations
+### **Maintenance Commands**
 ```bash
-# Application logs
-/var/lib/*/logs/vaultwarden/
-/var/lib/*/logs/caddy/
-/var/lib/*/logs/fail2ban/
+# Database optimization
+./tools/sqlite-maintenance.sh --full
 
-# System logs
-journalctl -t monitor
-journalctl -t sqlite-maintenance
-journalctl -t backup
+# Update CloudFlare IP ranges
+./tools/update-cloudflare-ips.sh
+
+# Test backup system
+./tools/db-backup.sh --dry-run
+
+# Validate configuration
+./startup.sh --validate
+
+# Check security status
+sudo ufw status && sudo fail2ban-client status
 ```
 
-### Troubleshooting Resources
-- **Troubleshooting Guide**: `docs/Troubleshooting.md`
-- **Security Guide**: `docs/Security.md`
-- **Monitoring Guide**: `docs/Monitoring.md`
-- **Architecture Guide**: `docs/Architecture.md`
+### **Debug Commands**
+```bash
+# Enable debug mode for any script
+export DEBUG=1
+./startup.sh
 
-This quick start guide provides a streamlined path to a fully operational, production-ready VaultWarden deployment with comprehensive automation and monitoring.
+# Check container resource usage
+docker stats
+
+# View system logs
+journalctl -t monitor
+journalctl -t backup
+journalctl -f
+
+# Check network connectivity
+curl -v https://vault.yourdomain.com
+```
+
+## 🎯 **Success Checklist**
+
+After completing this guide, you should have:
+
+- [ ] **Web Access**: Can access `https://vault.yourdomain.com`
+- [ ] **Admin Access**: Can access admin panel with generated token
+- [ ] **User Account**: Created and tested first user account
+- [ ] **SSL Certificate**: Valid, trusted SSL certificate (A+ SSL Labs rating)
+- [ ] **Security**: UFW firewall active, fail2ban protecting services
+- [ ] **Monitoring**: Health checks running every 5 minutes
+- [ ] **Backups**: Daily database backups, weekly full system backups
+- [ ] **Email**: SMTP configured for notifications (if desired)
+- [ ] **CloudFlare**: Enhanced security and performance (if configured)
+
+## 📚 **Next Steps**
+
+### **Immediate (Within 1 Hour)**
+1. **Test User Experience**: Install Bitwarden mobile/desktop apps
+2. **Backup Admin Token**: Store securely offline
+3. **Create Team Accounts**: Set up accounts for your users
+4. **Test Backup System**: Run manual backup and verify
+
+### **Within 24 Hours**
+1. **Configure Monitoring**: Test email notifications
+2. **Security Audit**: Review fail2ban logs, check SSL rating
+3. **Performance Tuning**: Adjust resource limits if needed
+4. **Documentation**: Record your specific configuration choices
+
+### **Within 1 Week**
+1. **Off-site Backups**: Configure cloud storage for backups
+2. **User Training**: Train team on VaultWarden features
+3. **Monitoring Review**: Analyze automated health reports
+4. **Recovery Testing**: Test restore procedure
+
+## 🆘 **Getting Help**
+
+If you encounter issues not covered here:
+
+1. **Check Logs**: `docker compose logs service-name`
+2. **Run Diagnostics**: `./tools/monitor.sh --verbose`
+3. **Review Documentation**: See `docs/` directory for detailed guides
+4. **Search Issues**: Check GitHub Issues for similar problems
+5. **Report Bugs**: Create GitHub Issue with log details
+
+**Remember**: This system is designed to be "set and forget" - most issues are resolved automatically by the monitoring and self-healing systems."""
