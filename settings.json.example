@@ -5,6 +5,8 @@
   "ADMIN_TOKEN": "paste-generated-admin-token-here",
   "ADMIN_BASIC_AUTH_HASH": "",
   "BACKUP_PASSPHRASE": "paste-generated-backup-passphrase-here",
+  "CLOUDFLARE_ZONE_ID": "",
+  "CLOUDFLARE_API_TOKEN": "",
 
   "DATABASE_URL": "sqlite:///data/db.sqlite3",
   "ROCKET_WORKERS": 1,
