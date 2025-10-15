@@ -59,6 +59,7 @@ services:
     environment:
       - DOMAIN=${DOMAIN}
       - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_BASIC_AUTH_HASH=${ADMIN_BASIC_AUTH_HASH}
       - TZ=${TZ:-UTC}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
